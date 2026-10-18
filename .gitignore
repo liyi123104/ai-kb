@@ -1,0 +1,39 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 环境变量（计划书 6.1：.env 不进 Git）
+.env
+
+# 向量库与业务库（可重建，不进 Git）
+*.chroma
+data/chroma/*
+!data/chroma/.gitkeep
+data/app.db
+
+# 上传的原始文件（运行时产生）
+data/uploads/*
+!data/uploads/.gitkeep
+
+# 学习资料：10 份 PDF，约 80MB，不进 Git
+materials/
+
+# 前端
+web/node_modules/
+web/dist/
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# 计划书 v1.0 备份（历史留档，不进库）
+docs/*_v1.0_backup.docx
