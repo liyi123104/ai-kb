@@ -9,6 +9,14 @@
 > 详细计划与进度见 [`docs/AI学习资料知识库-项目计划书.docx`](docs/AI学习资料知识库-项目计划书.docx)（v1.3）；
 > 基线数据见 [`docs/baseline.md`](docs/baseline.md)。
 
+## 界面
+
+![首页](docs/screenshots/ui-home.png)
+
+![问答与出处](docs/screenshots/ui-answer.png)
+
+左侧是已入库资料（片数、大小、删除），右侧问答区给出答案与**出处卡片**（文件名 + PDF 页码 + 相似度 + 命中片段）。
+
 ## 架构
 
 ```text
@@ -46,6 +54,9 @@ Copy-Item .env.example .env
 # 3) 起服务
 .\.venv\Scripts\python.exe -m app.main          # http://127.0.0.1:8000/docs
 .\.venv\Scripts\python.exe -m streamlit run ui_streamlit.py   # 临时界面 http://localhost:8501
+
+# 4) 产品界面（Vue3）
+cd web; npm install --registry=https://registry.npmmirror.com; npm run dev   # http://127.0.0.1:5173
 ```
 
 前置条件：本机装好 [Ollama](https://ollama.com/) 并拉取模型：
@@ -138,9 +149,10 @@ docs/           计划书、基线、环境记录
 
 ## 当前进度
 
-- ✅ M0 环境 · M1 命令行 RAG · M2 后端 API · M4 测试集与基线
-- 🟡 M3 前端：Streamlit 已可用；Vue3 代码已就绪，待 `npm install` 后联调
-- ⬜ M5 交付（Docker 待验证、演示视频待录）· M6 加分（A/B 实验、云部署）
+- ✅ M0 环境 · M1 命令行 RAG · M2 后端 API · M3 前端（Vue3 可跑，代理/SSE 已验） · M4 测试集与基线
+- 🟡 M5 交付：Docker 文件就绪但本机无 Docker、演示视频待录
+- 🟡 M6 加分：A/B 实验 E1/E4 已出数据；E2/E3 需额外拉模型；云部署待定方案
+- ⚠️ 首字延迟未达 ≤3s：6GB 显存跑本地 7B 模型，实测热态 3.5–6s，详见 `docs/baseline.md` 第 8 节
 
 ## 已知限制
 
