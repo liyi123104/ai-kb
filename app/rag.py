@@ -183,17 +183,28 @@ def build_chunks(path: Path, source_name: str | None = None) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # 向量库
 # --------------------------------------------------------------------------- #
+_VECTORSTORE = None
+
+
 def get_vectorstore():
-    from langchain_community.vectorstores import Chroma
+    """返回向量库客户端单例。
 
-    from app.llm import get_embedder
+    为什么缓存：Chroma 的 PersistentClient 初始化要打开 SQLite 并加载 HNSW 索引，
+    每次请求都新建实测要 0.7–0.8 秒，直接把首字延迟顶到 4 秒以上。
+    """
+    global _VECTORSTORE
+    if _VECTORSTORE is None:
+        from langchain_community.vectorstores import Chroma
 
-    return Chroma(
-        collection_name=settings.collection,
-        embedding_function=get_embedder(),
-        persist_directory=str(settings.chroma_dir),
-        collection_metadata={"hnsw:space": "cosine"},
-    )
+        from app.llm import get_embedder
+
+        _VECTORSTORE = Chroma(
+            collection_name=settings.collection,
+            embedding_function=get_embedder(),
+            persist_directory=str(settings.chroma_dir),
+            collection_metadata={"hnsw:space": "cosine"},
+        )
+    return _VECTORSTORE
 
 
 def _chunk_id(c: dict, seq: int) -> str:

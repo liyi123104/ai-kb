@@ -6,6 +6,9 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   server: {
+    // 显式绑 IPv4：Vite 默认 host 是 "localhost"，在部分 Windows 环境只会监听 ::1，
+    // 导致浏览器输 127.0.0.1:5173 打不开（实测踩到过）。
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': {

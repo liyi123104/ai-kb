@@ -39,6 +39,54 @@ ALLOWED_SUFFIXES = rag.SUPPORTED_SUFFIXES
 MAX_UPLOAD_MB = 100
 
 
+@app.on_event("startup")
+def warm_up_models() -> None:
+    """启动后预热模型，并周期性保活（后台线程，不阻塞启动）。
+
+    为什么需要：
+      1) Ollama 首次加载 7B 模型要十几秒，不预热的话第一个用户请求的首字延迟会从
+         3 秒退化到 10–20 秒，直接违反「首字 ≤3 秒」的目标；
+      2) 实测 keep_alive 对 embeddings 接口不生效，bge-m3 闲置几十秒就被卸载，每次
+         检索都要重新加载 2.7 秒 —— 所以这里每 4 分钟轻点一次，把两个模型摁在显存里。
+    预热/保活失败不致命（比如 Ollama 没启动），只打日志，服务照常起来。
+    """
+    import threading
+    import time
+
+    def _loop() -> None:
+        import json as _json
+        import urllib.request
+
+        from app.config import settings as _s
+        from app.llm import get_embedder
+
+        embedder = get_embedder()
+
+        def _keep_chat_alive() -> None:
+            # 关键：用 num_predict=0 的 generate 调用把模型摁在显存里，但不产生任何 token。
+            # 之前用 llm.invoke("ping") 会覆盖 Ollama 的 prompt 缓存，导致下一次真实请求
+            # 要重新做 prompt 求值（实测首 token 从 0.5s 掉到 3.5s）。
+            payload = {"model": _s.ollama_model, "prompt": "",
+                       "keep_alive": _s.ollama_keep_alive,
+                       "options": {"num_predict": 0}}
+            req = urllib.request.Request(
+                _s.ollama_base_url.rstrip("/") + "/api/generate",
+                data=_json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=120).read()
+
+        while True:
+            try:
+                embedder.embed_query("保活")
+                _keep_chat_alive()
+                print("[warmup] 模型保活完成", flush=True)
+            except Exception as exc:  # noqa: BLE001 - 预热失败不应影响服务
+                print(f"[warmup] 预热跳过：{exc}", flush=True)
+            time.sleep(240)  # 4 分钟一次，短于 Ollama 默认 5 分钟卸载阈值
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, description="用户问题")
     session_id: str | None = Field(default=None, description="会话 ID，留空则新建")
@@ -117,7 +165,10 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
         collected: list[str] = []
         sources: list[dict] = []
         try:
+            import time as _t
+            _t0 = _t.perf_counter()
             hits = rag.retrieve(req.question)
+            print(f"[chat] retrieve {_t.perf_counter() - _t0:.2f}s, hits={len(hits)}", flush=True)
             sources = rag.make_sources(hits)
             yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
 
@@ -130,9 +181,12 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                                                     question=req.question)
                 from app.llm import get_llm
 
+                _t1 = _t.perf_counter()
                 for piece in get_llm().stream(prompt):
                     text = piece.content if isinstance(piece.content, str) else str(piece.content)
                     if text:
+                        if not collected:
+                            print(f"[chat] first token {_t.perf_counter() - _t1:.2f}s", flush=True)
                         collected.append(text)
                         yield f"event: token\ndata: {json.dumps(text, ensure_ascii=False)}\n\n"
 
