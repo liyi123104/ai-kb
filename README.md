@@ -58,10 +58,30 @@ D:\ai-kb\
 - [x] T0.1 环境自检 → 记录见 [`docs/env-T0.1.md`](docs/env-T0.1.md)
 - [x] T0.2 资料格式检查 → 10/10 电子版，T1.9 OCR 取消
 - [x] T0.3 项目骨架（本文件 + 目录 + Git + .gitignore）
-- [ ] T0.4 安装依赖
+- [x] T0.4 安装依赖（`.venv` = Python 3.12.10，145 个包，`requirements.txt` 已锁版本）
 
 ## 运行环境
 
-- Python：需 ≥ 3.10；**虚拟环境建议用 3.12**（3.14 过新，部分依赖（chromadb/onnxruntime 等）可能还没有预编译轮子）
-- Ollama 0.13.5 已安装；`qwen2.5:7b` 尚未拉取（T1.5 前需要）
-- 依赖安装命令见计划书 T0.4，`requirements.txt` 在 T0.4 生成
+| 项 | 值 |
+|---|---|
+| 虚拟环境 | `D:\ai-kb\.venv`，Python **3.12.10**（隔离，`include-system-site-packages = false`） |
+| 依赖 | `requirements.txt`（148 行：3 行说明 + 144 条版本锁定） |
+| 关键版本 | langchain 1.4.6 · chromadb 1.5.9 · fastapi 0.150.0 · streamlit 1.66.0 · **sentence-transformers 6.1.0** · **torch 2.14.1+cpu** |
+| Ollama | 0.13.5，模型目录 `D:\deepseekr17b\models`（已拉 `deepseek-r1:7b`；待拉 `bge-m3`、`qwen2.5:7b`） |
+
+一键安装依赖：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+> 国内网络若超时，改用镜像：`-i https://pypi.tuna.tsinghua.edu.cn/simple`。
+> 详细环境记录见 [`docs/env-T0.1.md`](docs/env-T0.1.md)。
+
+激活虚拟环境（可选，直接调 `.\.venv\Scripts\python.exe` 效果相同）：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass   # 本项目目录带 Low 完整性标签，需先放行当前会话
+.\.venv\Scripts\Activate.ps1                # 或在 cmd 里用 .venv\Scripts\activate.bat
+```

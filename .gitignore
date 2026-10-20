@@ -35,5 +35,12 @@ Thumbs.db
 # 日志
 *.log
 
+# pip / torch 运行期临时目录
+pip-build-tracker-*/
+pip-download-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+torchinductor_*/
+
 # 计划书 v1.0 备份（历史留档，不进库）
 docs/*_v1.0_backup.docx
