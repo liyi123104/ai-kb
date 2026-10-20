@@ -1,0 +1,63 @@
+# A/B 实验记录（T6.1）
+
+实验纪律（计划书 3.3）：**每次只改一个变量，其余保持与基线一致**；MVP 已跑通（M4 达标）后才开始。
+基线配置见 `docs/baseline.md`：`chunk 512 / overlap 50 / bge-m3 / 无 rerank / Top-5`。
+
+评测口径：30 题测试集，命中定义与基线一致（Top-5 中存在同文件且页码落在
+`[page_start, page_end]` 的片段）。实验阶段只算**召回率与命中名次**（不跑生成），每次约 15 秒。
+
+复现命令（每个变体一个独立集合，基线集合 `ai-kb` 不动）：
+
+```powershell
+$env:CHROMA_COLLECTION='exp-1024'; $env:CHUNK_SIZE='1024'; $env:CHUNK_OVERLAP='50'
+.\.venv\Scripts\python.exe scripts\exp_ingest.py --all
+.\.venv\Scripts\python.exe scripts\exp_eval.py
+```
+
+## E1 切片长度（256 / 512 / 1024）— 已完成
+
+| chunk_size | 库内片数 | 召回率 | 平均命中名次 | Top-1 命中 | 结论 |
+|---|---|---|---|---|---|
+| 256 | 19,494 | 90.0%（27/30） | 1.56 | 19 题 | 召回与基线持平，名次略差，索引翻倍 |
+| **512（基线）** | **8,895** | **90.0%（27/30）** | **1.33** | **20 题** | **最优：召回最高、名次最好、索引最小** |
+| 1024 | 4,271 | 86.7%（26/30） | 1.92 | 15 题 | 明显变差 |
+
+**结论：维持默认 512，不改。**
+
+理由：
+1. 512 与 256 召回率相同，但 512 的平均命中名次更好（1.33 vs 1.56），Top-1 命中更多（20 vs 19）。
+2. 256 的索引是 512 的 2.2 倍（19,494 vs 8,895 片），入库时间约 1.5 小时 vs 50 分钟，收益为负。
+3. 1024 的字块混入多个主题，向量区分度下降，召回掉 3.3 个百分点。
+
+这条结论与计划书的默认值一致，也回答了面试题「切片大小怎么定的」。
+
+## E3 Embedding 模型（bge-small / bge-m3 / bge-large）— 未执行
+
+需要额外拉取模型：`ollama pull bge-large`（约 1.2GB）、`ollama pull bge-small`（约 0.1GB）。
+按项目约定，软件/模型安装由用户执行，拉取后再补测（换模型必须重建索引，每次约 50 分钟）。
+
+## E2 重排序 rerank（关闭 / 开启）— 未执行
+
+需要 reranker 模型（如 `bge-reranker-v2-m3`），同样需用户拉取。
+另外重排序会改变 Top-5 的构成，需先确定命中判定口径（重排后按重排结果算命中），执行前会先说明方案。
+
+## E4 chunk overlap（0% / 20% / 50%）— 未执行
+
+每个变体都要重建索引（约 45–50 分钟/次）。若后续时间允许继续；当前 50% 为基线值且 E1 已验证
+切片长度的影响，overlap 的边际收益预计小于切片长度。
+
+## 实验环境
+
+| 项 | 值 |
+|---|---|
+| 机器 | i7-12700H / RTX 3060 6GB / 16GB 内存 |
+| Embedding | bge-m3（Ollama，1024 维） |
+| 向量库 | ChromaDB；每个变体独立集合（`exp-256` / `exp-1024`），基线 `ai-kb` 不动 |
+| 入库速度 | 约 3.1 片/秒（含嵌入） |
+| 磁盘 | 三个集合合计约 282MB（`data/chroma`，不进 Git） |
+
+清理实验集合（释放空间，需要时可用上面的命令重建）：
+
+```powershell
+.\.venv\Scripts\python.exe -c "import os,sys; sys.path.insert(0,'.'); os.environ['TEMP']='data/tmp'; os.environ['TMP']='data/tmp'; import chromadb; c=chromadb.PersistentClient(path='data/chroma'); [c.delete_collection(n) for n in ('exp-256','exp-1024')]"
+```
