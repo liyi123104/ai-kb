@@ -26,9 +26,11 @@ PROMPT_TEMPLATE = """你是一个严谨的知识库问答助手。请只依据�
 
 规则：
 1. 只使用参考资料中的信息，不要编造，不要引入资料之外的知识。
-2. 如果参考资料不足以回答问题，第一句必须原样写「资料中没有相关内容。」，再简要说明缺什么。
-3. 回答用中文；可以在中文里保留英文术语（如 Transformer、embedding）。
-4. 引用资料时用 [编号] 标注，例如「自注意力能并行计算 [2]」。
+2. 第一行直接给出答案（一句话），不要写"根据资料"之类的铺垫。
+3. 只有当你确实找不到任何相关依据时，才输出「资料中没有相关内容。」；
+   只要能回答，就绝对不要出现这句话，也不要先否定再答。
+4. 用与问题相同的语言回答（英文问题用英文答，中文问题用中文答）。
+5. 回答里用 [编号] 标注依据，例如「自注意力能并行计算 [2]」。
 
 【参考资料】
 {context}
@@ -307,8 +309,12 @@ def build_messages(hits: list[tuple], question: str) -> list[dict]:
     ]
 
 
-def answer(question: str, k: int | None = None) -> dict:
-    """检索 + 生成，返回结构化结果（/chat 与评测脚本共用）。"""
+def answer(question: str, k: int | None = None, answer_top_n: int = 3) -> dict:
+    """检索 + 生成，返回结构化结果（/chat 与评测脚本共用）。
+
+    answer_top_n：喂给模型几条上下文。检索评估仍按 Top-K（默认 5）计算命中，
+    但生成只用最相关的几条 —— 实测把 5 条全塞进去会掺入无关片段，反而拉低准确率。
+    """
     from app.llm import get_llm
 
     hits = retrieve(question, k)
@@ -322,7 +328,8 @@ def answer(question: str, k: int | None = None) -> dict:
                 "best_score": round(best_score, 4), "gate": settings.score_gate,
                 "gated": True, "error": None}
 
-    prompt = PROMPT_TEMPLATE.format(context=format_context(hits), question=question)
+    context_hits = hits[:answer_top_n]
+    prompt = PROMPT_TEMPLATE.format(context=format_context(context_hits), question=question)
     resp = get_llm().invoke(prompt)
     text = resp.content if isinstance(resp.content, str) else str(resp.content)
     return {"question": question, "answer": text.strip(), "sources": make_sources(hits),

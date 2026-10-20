@@ -1,0 +1,118 @@
+"""T4.1 用人工核对过的原文段落写 30 题测试集（语言与原文一致，答案取自原文）。"""
+import csv
+from pathlib import Path
+
+ROWS = [
+    # 1-3 attention-is-all-you-need.pdf
+    ("How many identical layers does the Transformer encoder stack contain?",
+     "N = 6 identical layers; each layer has a multi-head self-attention sub-layer and a position-wise fully connected feed-forward sub-layer.",
+     "attention-is-all-you-need.pdf", 3),
+    ("Why can a self-attention layer connect all positions with fewer sequential operations than a recurrent layer?",
+     "A self-attention layer connects all positions with a constant number of sequentially executed operations, whereas a recurrent layer requires O(n) sequential operations.",
+     "attention-is-all-you-need.pdf", 6),
+    ("What BLEU score does the Transformer (big) model reach on WMT 2014 English-to-French, and how long did it train on 8 P100 GPUs?",
+     "A BLEU score of 41.0, trained for 3.5 days on 8 P100 GPUs.",
+     "attention-is-all-you-need.pdf", 8),
+    # 4-6 d2l-zh.pdf
+    ("为什么用小批量可以把几百个样本的运算时间压缩到接近处理一个样本？",
+     "因为每个样本的模型计算和损失函数梯度都可以并行，GPU 处理几百个样本所花时间不比处理一个样本多太多。",
+     "d2l-zh.pdf", 115),
+    ("反向传播算法按什么顺序遍历网络，为什么要存储中间变量？",
+     "按链式法则从输出层到输入层反向遍历网络；存储计算某些参数梯度时所需的中间变量（偏导数）。",
+     "d2l-zh.pdf", 183),
+    ("“通过时间反向传播”为什么要缓存中间值、又为什么要做梯度截断？",
+     "缓存中间值是为了计算效率；截断是计算方便性和数值稳定性的需要，用来应对梯度爆炸或梯度消失。",
+     "d2l-zh.pdf", 360),
+    # 7-9 dpr-dense-retrieval.pdf
+    ("Which encoders does DPR use for questions and passages, and what is the resulting embedding dimension?",
+     "Two independent BERT (base, uncased) networks that take the [CLS] token representation as output, giving d = 768.",
+     "dpr-dense-retrieval.pdf", 3),
+    ("How do BM25 and DPR differ qualitatively in the passages they retrieve?",
+     "Term-matching methods like BM25 are sensitive to highly selective keywords and phrases, while DPR captures lexical variations or semantic relationships better.",
+     "dpr-dense-retrieval.pdf", 6),
+    ("What is in-batch negative training and why is it efficient?",
+     "It reuses the negative passages already present in the batch instead of creating new ones, which produces more training pairs and is memory-efficient.",
+     "dpr-dense-retrieval.pdf", 6),
+    # 10-12 mml-book
+    ("What does the Cauchy-Schwarz inequality state for an inner-product space?",
+     "For an inner-product vector space (V, <.,.>) the induced norm satisfies |<x, y>| <= ||x|| ||y||.",
+     "mml-book-数学基础.pdf", 81),
+    ("How are the principal components in PCA related to the covariance matrix S?",
+     "They are the eigenvectors of S associated with the largest eigenvalues; since S is symmetric, the spectral theorem gives an orthonormal eigenbasis.",
+     "mml-book-数学基础.pdf", 328),
+    ("What fully characterizes a multivariate Gaussian distribution?",
+     "A mean vector mu and a covariance matrix Sigma.",
+     "mml-book-数学基础.pdf", 204),
+    # 13-15 rag-lewis-2020.pdf
+    ("In RAG, what is referred to as the parametric memory?",
+     "The parameters theta of the BART generator.",
+     "rag-lewis-2020.pdf", 3),
+    ("How does decoding differ between RAG-Token and RAG-Sequence?",
+     "RAG-Token can be treated as a standard autoregressive seq2seq generator whose transition probability can be plugged into a standard beam decoder, whereas the RAG-Sequence likelihood does not decompose the same way.",
+     "rag-lewis-2020.pdf", 4),
+    ("What task does the FEVER benchmark define?",
+     "Classifying whether a natural language claim is supported or refuted by Wikipedia, or whether there is not enough information to decide.",
+     "rag-lewis-2020.pdf", 5),
+    # 16-18 rag-survey
+    ("What are the main drawbacks of Naive RAG described in the survey?",
+     "Retrieval challenges (poor precision/recall, misaligned or irrelevant chunks, missing crucial information) and generation difficulties such as hallucination not supported by the retrieved context.",
+     "rag-survey-gao-2023.pdf", 3),
+    ("How does Advanced RAG improve on Naive RAG?",
+     "It adds pre-retrieval and post-retrieval strategies and refines indexing through sliding windows, fine-grained segmentation and metadata.",
+     "rag-survey-gao-2023.pdf", 3),
+    ("How can sparse retrieval help dense retrieval models?",
+     "Sparse retrieval can enhance the zero-shot retrieval capability of dense models and help them handle queries containing rare entities, improving robustness.",
+     "rag-survey-gao-2023.pdf", 9),
+    # 19-21 ragas
+    ("How does Ragas define the faithfulness metric?",
+     "It measures the information consistency of the answer against the given context; claims that cannot be deduced from the context are penalized (scored in the range 0-10).",
+     "ragas-评测.pdf", 5),
+    ("How was the WikiEval dataset constructed?",
+     "50 Wikipedia pages covering events since the start of 2022 (prioritising recently edited pages); for each page ChatGPT suggested a question answerable from the introduction.",
+     "ragas-评测.pdf", 4),
+    ("How is the answer relevance score AR computed in Ragas?",
+     "AR = (1/n) * sum over i of sim(q, q_i), the average similarity between the question and the questions generated from the answer.",
+     "ragas-评测.pdf", 3),
+    # 22-24 self-rag
+    ("How is the ISREL critique score computed in SELF-RAG?",
+     "s(ISREL) = p(ISREL=RELEVANT) / (p(ISREL=RELEVANT) + p(ISREL=IRRELEVANT)).",
+     "self-rag-2023.pdf", 19),
+    ("What are reflection tokens in SELF-RAG and what do they enable?",
+     "Special tokens that the LM generates to reflect on retrieved passages and its own generations; they make the LM controllable during inference.",
+     "self-rag-2023.pdf", 1),
+    ("On which task families does SELF-RAG outperform ChatGPT and retrieval-augmented Llama2-chat?",
+     "Open-domain QA, reasoning and fact verification tasks, with gains in factuality and citation accuracy for long-form generation.",
+     "self-rag-2023.pdf", 1),
+    # 25-27 sentence-bert
+    ("What does the siamese network architecture of SBERT enable?",
+     "It derives fixed-sized vectors for input sentences, so that semantically similar sentences can be found with cosine similarity or Manhattan/Euclidean distance.",
+     "sentence-bert.pdf", 1),
+    ("What does the triplet objective function optimize in SBERT?",
+     "Given an anchor a, a positive p and a negative n, triplet loss tunes the network so that the distance between a and p is smaller than the distance between a and n.",
+     "sentence-bert.pdf", 3),
+    ("Which system has the highest correlation on the STS benchmark test set in Table 2?",
+     "BERT-NLI-STSb-large with 88.77, the highest value in the table.",
+     "sentence-bert.pdf", 5),
+    # 28-30 slp3
+    ("What perplexities do the unigram, bigram and trigram models give on the 1.5-million-word test set?",
+     "962 for the unigram model, 170 for the bigram model and 109 for the trigram model.",
+     "slp3-语音与语言处理第3版草稿.pdf", 85),
+    ("Why are BERT-style masked language models described as inefficient in the book?",
+     "Words other than the masked ones play no role in the loss function, so only 15% of the input samples are actually used for training weights.",
+     "slp3-语音与语言处理第3版草稿.pdf", 241),
+    ("What is the relationship between skip-gram and word2vec, and what does 'static embeddings' mean?",
+     "Skip-gram (with negative sampling, SGNS) is one of the two algorithms in the word2vec package; static embeddings mean one fixed embedding per word.",
+     "slp3-语音与语言处理第3版草稿.pdf", 145),
+]
+
+out = Path(r"D:\ai-kb\data\testset.csv")
+with out.open("w", newline="", encoding="utf-8-sig") as fh:
+    writer = csv.writer(fh)
+    writer.writerow(["id", "question", "expected_answer", "expected_source", "expected_page"])
+    for i, (q, a, src, page) in enumerate(ROWS, start=1):
+        writer.writerow([i, q, a, src, page])
+
+from collections import Counter
+c = Counter(r[2] for r in ROWS)
+print("题目:", len(ROWS), "| 文件:", len(c), "| 页码覆盖:", sum(1 for r in ROWS if r[3]) / len(ROWS))
+print("每文件:", dict(c))
