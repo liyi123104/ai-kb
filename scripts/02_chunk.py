@@ -102,35 +102,28 @@ def enforce_overlap(full_text: str, bounds: list[tuple[int, int]],
     return fixed
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="文本切片（512/50，保留页码区间）")
-    parser.add_argument("pdf", nargs="?", default=str(DEFAULT_PDF), help="PDF 路径")
-    parser.add_argument("--chunk-size", type=int, default=512, help="切片长度，默认 512")
-    parser.add_argument("--overlap", type=int, default=50, help="重叠长度，默认 50")
-    parser.add_argument("--sample", type=int, default=3, help="打印多少个切片样例")
-    parser.add_argument("--out", default=None, help="可选：切片结果写入 JSONL，供 T1.4 入库")
-    args = parser.parse_args()
+def build_chunks(pdf_path: Path, chunk_size: int = 512, overlap: int = 50) -> list[dict]:
+    """把一份 PDF 切成带页码区间的 chunk 列表（T1.4 入库直接复用）。
 
-    pdf_path = Path(args.pdf)
+    返回
+        [{"source", "page", "page_start", "page_end", "chars", "text"}, ...]
+    异常
+        ValueError: 交给 extract_pages 处理（文件不存在/非 PDF/加密）
+    """
     extractor = load_extractor()
-    try:
-        pages = extractor.extract_pages(pdf_path)
-    except ValueError as exc:
-        print(f"[错误] {exc}", file=sys.stderr)
-        return 1
-
+    pages = extractor.extract_pages(pdf_path)
     full_text, starts, spans = build_page_spans(pages)
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.overlap,
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
         add_start_index=True,
         separators=["\n\n", "\n", "。", "！", "？", "；", ". ", "! ", "? ", "; ", "，", ",", " ", ""],
     )
     docs = splitter.create_documents([full_text])
     bounds = [(int(d.metadata.get("start_index", 0)),
                int(d.metadata.get("start_index", 0)) + len(d.page_content)) for d in docs]
-    fixed = enforce_overlap(full_text, bounds, args.chunk_size, args.overlap)
+    fixed = enforce_overlap(full_text, bounds, chunk_size, overlap)
 
     chunks: list[dict] = []
     for start, end in fixed:
@@ -148,6 +141,24 @@ def main() -> int:
             "chars": len(text),
             "text": text,
         })
+    return chunks
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="文本切片（512/50，保留页码区间）")
+    parser.add_argument("pdf", nargs="?", default=str(DEFAULT_PDF), help="PDF 路径")
+    parser.add_argument("--chunk-size", type=int, default=512, help="切片长度，默认 512")
+    parser.add_argument("--overlap", type=int, default=50, help="重叠长度，默认 50")
+    parser.add_argument("--sample", type=int, default=3, help="打印多少个切片样例")
+    parser.add_argument("--out", default=None, help="可选：切片结果写入 JSONL，供 T1.4 入库")
+    args = parser.parse_args()
+
+    pdf_path = Path(args.pdf)
+    try:
+        chunks = build_chunks(pdf_path, args.chunk_size, args.overlap)
+    except ValueError as exc:
+        print(f"[错误] {exc}", file=sys.stderr)
+        return 1
 
     lengths = [c["chars"] for c in chunks]
 
