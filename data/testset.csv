@@ -1,0 +1,31 @@
+﻿id,question,expected_answer,expected_source,expected_page
+1,Transformer在英语句法解析任务上的输出有什么特点？,the output is subject to strong structural constraints,attention-is-all-you-need.pdf,9
+2,鞍点的定义是什么？,是指函数的所有梯度都消失但既不是全局最小值也不是局部最小值的任何位置。,d2l-zh.pdf,456
+3,ALSH的全称是什么？,Asymmetric LSH,dpr-dense-retrieval.pdf,11
+4,什么是凸函数的epigraph？,epigraph of the convex function,mml-book-数学基础.pdf,242
+5,RAG-Token模型在Jeopardy-QGen任务上的Label Accuracy是多少？,75.1,rag-lewis-2020.pdf,8
+6,第二部分介绍了什么？,Section II introduces the main concept and current paradigms of RAG。,rag-survey-gao-2023.pdf,2
+7,两个注释员在多少比例的情况下对faithfulness和context relevance达成了一致？,around 95%,ragas-评测.pdf,4
+8,Sail的全称是什么？,Search-augmented instruction learning,self-rag-2023.pdf,13
+9,分类目标函数是如何计算输出的？,"o = softmax(Wt(u,v,|u−v|))",sentence-bert.pdf,3
+10,哪些词组可能不会被纳入锚定字典？,likeLovelace和likeborn,slp3-语音与语言处理第3版草稿.pdf,567
+11,哪种模型在半监督设置下的准确率达到92.7？,Transformer (4 layers) semi-supervised 92.7,attention-is-all-you-need.pdf,10
+12,步幅可以减小输出的高和宽的比例是多少？,仅为输入的高和宽的1/n（n是一个大于1的整数）,d2l-zh.pdf,257
+13,BM25 + DPR在TREC数据集上的Top-20检索准确率是多少？,76.6,dpr-dense-retrieval.pdf,5
+14,在实际应用中我们通常需要什么？,Expo,mml-book-数学基础.pdf,18
+15,在P(RAG-Sequence(y|x))的计算中，是如何处理top-K文档的？,"pRAG-Sequence(y|x) ≈ ∑<sub>z∈top-k(p(·|x))</sub> pη(z|x)pθ(y|x,z )",rag-lewis-2020.pdf,3
+16,表格IV总结了哪些评估框架的评价目标和方面？,Evaluation Framework Evaluation Targets Evaluation Aspects,rag-survey-gao-2023.pdf,14
+17,Retrieval-augmented generation 是什么？,Retrieval-augmented generation for knowledge-intensive NLP tasks,ragas-评测.pdf,6
+18,该文献引用了哪一年的论文？,2019,self-rag-2023.pdf,12
+19,在推理阶段使用哪种相似度计算方法？,cosine-similarity,sentence-bert.pdf,8
+20,文中列出了哪些正面评价词汇？,"great, best, love(d), delicious, amazing, favorite, perfect, excellent, awesome, friendly, fantastic, fresh, wonderful, incredible, sweet, yum(my)",slp3-语音与语言处理第3版草稿.pdf,541
+21,谁提出了缩放点积注意力、多头注意力和无参数位置表示？,Noam,attention-is-all-you-need.pdf,1
+22,如何利用GPU的计算性能进行研究？,首先是如何使用单个GPU，然后是如何使用多个GPU和多个服务器（具有多个GPU）,d2l-zh.pdf,236
+23,英国在UCI眼中是否被认作是一个地区？,"England is not recognised as a region by the UCI,",dpr-dense-retrieval.pdf,13
+24,更新公式中的动量项是如何定义的？,¦xi = xi − xi−1 = α∇xi−1 − γi−1((∇f )(xi−1))⊤,mml-book-数学基础.pdf,237
+25,RAG模型在哪些数据集上取得了最先进的结果？,"open Natural Questions [29], WebQuestions [3]和CuratedTrec [2]",rag-lewis-2020.pdf,2
+26,Self-Mem 的工作频率是怎样的？,Iterative,rag-survey-gao-2023.pdf,6
+27,什么是语言模型？,"Language Models (LMs) capture a vast amount of knowledge about the world, which allows them to answer questions without accessing any external sources.",ragas-评测.pdf,1
+28,Jiang et al. (2023) 提出的适应性检索是如何进行的？,adaptively retrieve passages for generation on top of a proprietary LLM,self-rag-2023.pdf,2
+29,Sentence-BERT使用了什么类型的网络？,Sentence-BERT使用了Siamese BERT-Networks。,sentence-bert.pdf,1
+30,在布朗语料库和WSJ语料库中，大多数词型的比例是多少？,85-86%,slp3-语音与语言处理第3版草稿.pdf,412
