@@ -1,87 +1,149 @@
 # AI 学习资料知识库（ai-kb）
 
-个人 RAG 知识库问答系统：把 AI 学习资料灌进向量库，提问后返回**带出处**的答案（文件名 + 页码）。
+把 AI 学习资料灌进向量库，提问后返回**带出处**的答案（文件名 + PDF 页码）。
 
-> 项目计划书见 [`docs/AI学习资料知识库-项目计划书.docx`](docs/AI学习资料知识库-项目计划书.docx)（v1.1）。任务按计划书第五节的任务 ID 顺序推进。
+- 单用户、无账号体系；支持 PDF / Word / Markdown / TXT
+- 答案逐字流式输出，附「文件 + 页码 + 命中片段 + 相似度」
+- 自建 30 题测试集评测：**检索召回率 90.0%**、**答案准确率 76.7%**
 
-## 技术栈（计划书第 2 节，已定稿，禁止更换）
+> 详细计划与进度见 [`docs/AI学习资料知识库-项目计划书.docx`](docs/AI学习资料知识库-项目计划书.docx)（v1.3）；
+> 基线数据见 [`docs/baseline.md`](docs/baseline.md)。
 
-| 层 | 选型 |
-|---|---|
-| 后端 | FastAPI + Pydantic |
-| AI 编排 | LangChain |
-| 向量库 | ChromaDB（本地文件版，`data/chroma/`） |
-| Embedding | `BAAI/bge-m3`（多语，1024 维，约 2.2GB） |
-| 业务库 | SQLite（`data/app.db`） |
-| 模型（开发） | Ollama + `qwen2.5:7b` |
-| 模型（演示） | DeepSeek API |
-| 前端 | Streamlit（临时）→ Vue3 + Element Plus + Vite（最终） |
-| 部署 | Docker Compose |
-
-模型调用统一走 `app/llm.py` 的抽象层，用 `.env` 的 `LLM_PROVIDER` 切换，业务代码不硬编码模型。
-
-## 目录结构（计划书 6.1）
+## 架构
 
 ```text
-D:\ai-kb\
-├─ app\            后端：main.py / rag.py / llm.py / db.py / config.py（T2.1 落地）
-├─ web\            Vue3 前端（M3 起）
-├─ scripts\        一次性脚本：提取、切片、评测
-├─ data\           chroma\ 向量库 · app.db · uploads\ 原始文件 · testset.csv
-├─ docs\           计划书、文档、截图
-├─ materials\      10 份 AI 学习资料 PDF（约 80MB，不进 Git）
-├─ .gitignore
-└─ README.md
+            ┌──────────────────────────────┐
+ 浏览器 ──▶ │ Vue3 + Element Plus (web/)   │  Vite 开发 / Nginx 托管
+            └───────────────┬──────────────┘
+                     /api 代理（SSE 不缓冲）
+            ┌───────────────▼──────────────┐
+            │ FastAPI（app/main.py）        │  /upload /chat /chat/stream /files
+            ├──────────────────────────────┤
+            │ RAG 核心（app/rag.py）        │  解析→切片→检索→拼 prompt→生成
+            ├──────────────┬───────────────┤
+            │ ChromaDB      │ SQLite        │  向量库 data/chroma · 会话 data/app.db
+            │ (bge-m3)      │ (历史)        │
+            └──────────────┴───────┬───────┘
+                                    │ HTTP
+                          ┌─────────▼─────────┐
+                          │ Ollama（宿主机）    │  bge-m3（向量）+ qwen2.5:7b（生成）
+                          └───────────────────┘
 ```
 
-`app/`、`web/`、`scripts/`、`data/chroma/`、`data/uploads/` 目前用 `.gitkeep` 占位，保证目录结构进版本库；对应代码文件在各任务中创建。
+模型层可切换：`LLM_PROVIDER=ollama`（本地免费）或 `deepseek`（云端，需 API Key），
+业务代码不硬编码模型名，见 `app/llm.py`。
 
-## 学习资料（`materials/`，10 份，不进 Git）
+## 快速开始（本地）
 
-| # | 文件 | 内容 |
+```powershell
+# 1) 依赖
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# 2) 配置（按需改 .env：模型名、端口、闸门阈值）
+Copy-Item .env.example .env
+
+# 3) 起服务
+.\.venv\Scripts\python.exe -m app.main          # http://127.0.0.1:8000/docs
+.\.venv\Scripts\python.exe -m streamlit run ui_streamlit.py   # 临时界面 http://localhost:8501
+```
+
+前置条件：本机装好 [Ollama](https://ollama.com/) 并拉取模型：
+
+```powershell
+ollama pull bge-m3
+ollama pull qwen2.5:7b
+```
+
+首次使用需要把资料入库（把 PDF 放进 `materials/`）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\04_store.py --all    # 全量入库（约 8,900 片，视机器 40-60 分钟）
+```
+
+## Docker（可选）
+
+```powershell
+docker compose up -d --build
+# 前端 http://localhost/    后端 http://localhost:8000/docs
+```
+
+Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（compose 已配好）。
+
+> 说明：本机当前未安装 Docker，这一项**尚未实机验证**，验证后再更新本段。
+
+## 配置（`.env`）
+
+| 键 | 默认 | 说明 |
 |---|---|---|
-| 1 | `d2l-zh.pdf` | 动手学深度学习（中文第二版） |
-| 2 | `mml-book-数学基础.pdf` | Mathematics for Machine Learning |
-| 3 | `slp3-语音与语言处理第3版草稿.pdf` | Speech and Language Processing（3rd draft） |
-| 4 | `attention-is-all-you-need.pdf` | Attention Is All You Need |
-| 5 | `sentence-bert.pdf` | Sentence-BERT |
-| 6 | `dpr-dense-retrieval.pdf` | Dense Passage Retrieval |
-| 7 | `rag-lewis-2020.pdf` | RAG 原始论文 |
-| 8 | `rag-survey-gao-2023.pdf` | RAG 综述 |
-| 9 | `self-rag-2023.pdf` | Self-RAG |
-| 10 | `ragas-评测.pdf` | RAGAS：RAG 自动评测 |
+| `LLM_PROVIDER` | `ollama` | `ollama` 或 `deepseek` |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | 生成模型 |
+| `OLLAMA_EMBED_MODEL` | `bge-m3:latest` | 向量模型（1024 维） |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 地址 |
+| `DEEPSEEK_API_KEY` | 空 | 切云端时才需要 |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | 512 / 50 | 切片参数 |
+| `TOP_K` | 5 | 检索条数 |
+| `RAG_SCORE_GATE` | 0.45 | 最佳相似度低于此值直接答「资料中没有相关内容」 |
+| `APP_PORT` | 8000 | 服务端口 |
 
-全部为官方发布或 arXiv 预印本，10/10 含可复制文字层（T0.2 结论），无扫描件，无需 OCR。
+`.env` 不进 Git，模板见 `.env.example`。
+
+## 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/health` | 健康检查（返回库里条数与当前模型） |
+| POST | `/upload` | 上传文件 → 解析/切片/嵌入/入库，返回 `filename/chunks/size` |
+| POST | `/chat` | 问答，返回 `answer/sources/session_id` |
+| POST | `/chat/stream` | SSE 流式：`sources → token… → done` |
+| GET | `/files` | 已入库文件（文件名、大小、切片数） |
+| DELETE | `/files/{name}` | 删除文件及其向量 |
+| GET | `/sessions/{id}` | 按会话 ID 取回历史 |
+
+## 项目结构
+
+```text
+app/            config.py 配置 · llm.py 模型抽象 · rag.py RAG 核心 · db.py 历史 · main.py 路由
+scripts/        01 提取 · 02 切片 · 03 向量验证 · 04 入库 · 05 命令行 RAG · 06 测试集 · evaluate.py 评测
+web/            Vue3 前端（src/views/Chat.vue 主界面）
+materials/      10 份 AI 学习资料 PDF（不进 Git）
+data/           chroma/ 向量库 · app.db 历史 · uploads/ 上传文件 · testset.csv 测试集
+docs/           计划书、基线、环境记录
+```
+
+## 评测
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate.py
+```
+
+30 题覆盖 10 份资料，指标定义与错题分析见 `docs/baseline.md`。当前基线：
+
+| 指标 | 目标 | 实测 |
+|---|---|---|
+| 检索召回率 | ≥ 80% | **90.0%** |
+| 答案准确率 | ≥ 70% | **76.7%** |
+| 首字延迟 / 完整耗时 | ≤ 3s / ≤ 15s | 2.7–3.2s / 均值 7.7s |
+
+## 几个值得说的技术点
+
+1. **切片的 50 字重叠是补出来的**：LangChain 的 `chunk_overlap` 按切分单元整块回退，
+   PDF 长行会让重叠变成 0。本项目切完后再做边界补齐，保证「≤512 字且相邻重叠 ≥50」。
+2. **「资料中没有」用双保险**：相似度闸门（0.45）+ prompt 约束。单纯靠阈值不可靠 ——
+   实测无关文本对的余弦也能到 0.35。
+3. **bge-m3 的 NaN 兜底**：Ollama 版模型对个别 token 会返回 500，已在 Embedding 层加
+   降级重试，避免一句坏输入让整次检索失败。
+4. **出处不撒谎**：跨页切片同时记录 `page_start/page_end`，回答里写 `p.434–435`；
+   d2l-zh 的印刷页码 = 物理页 − 18，文档如实标注是 PDF 物理页。
 
 ## 当前进度
 
-- [x] T0.1 环境自检 → 记录见 [`docs/env-T0.1.md`](docs/env-T0.1.md)
-- [x] T0.2 资料格式检查 → 10/10 电子版，T1.9 OCR 取消
-- [x] T0.3 项目骨架（本文件 + 目录 + Git + .gitignore）
-- [x] T0.4 安装依赖（`.venv` = Python 3.12.10，145 个包，`requirements.txt` 已锁版本）
+- ✅ M0 环境 · M1 命令行 RAG · M2 后端 API · M4 测试集与基线
+- 🟡 M3 前端：Streamlit 已可用；Vue3 代码已就绪，待 `npm install` 后联调
+- ⬜ M5 交付（Docker 待验证、演示视频待录）· M6 加分（A/B 实验、云部署）
 
-## 运行环境
+## 已知限制
 
-| 项 | 值 |
-|---|---|
-| 虚拟环境 | `D:\ai-kb\.venv`，Python **3.12.10**（隔离，`include-system-site-packages = false`） |
-| 依赖 | `requirements.txt`（148 行：3 行说明 + 144 条版本锁定） |
-| 关键版本 | langchain 1.4.6 · chromadb 1.5.9 · fastapi 0.150.0 · streamlit 1.66.0 · **sentence-transformers 6.1.0** · **torch 2.14.1+cpu** |
-| Ollama | 0.13.5，模型目录 `D:\deepseekr17b\models`（已拉 `deepseek-r1:7b`；待拉 `bge-m3`、`qwen2.5:7b`） |
-
-一键安装依赖：
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-> 国内网络若超时，改用镜像：`-i https://pypi.tuna.tsinghua.edu.cn/simple`。
-> 详细环境记录见 [`docs/env-T0.1.md`](docs/env-T0.1.md)。
-
-激活虚拟环境（可选，直接调 `.\.venv\Scripts\python.exe` 效果相同）：
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass   # 本项目目录带 Low 完整性标签，需先放行当前会话
-.\.venv\Scripts\Activate.ps1                # 或在 cmd 里用 .venv\Scripts\activate.bat
-```
+- 单用户设计，无鉴权（计划书明确不做用户系统）
+- 目录页/参考文献页仍会进入向量库（检索侧已过滤大部分）
+- 本地 7B 模型在长答案上偶有细节偏差，基线文档里逐条记录了错题

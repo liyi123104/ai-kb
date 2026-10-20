@@ -1,0 +1,49 @@
+# 一键启动（计划书 T5.1）：docker compose up -d
+#
+# 两个服务：
+#   backend  FastAPI + RAG（8000）
+#   frontend Nginx 托管的 Vue3 静态站点（80），把 /api 反代到 backend
+#
+# Ollama 跑在宿主机（模型太大，不适合塞进镜像），容器用 host.docker.internal 访问。
+# 数据持久化：./data 与 ./materials 挂进容器，重建容器不丢向量库与语料。
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-kb-backend:latest
+    container_name: ai-kb-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # 容器内访问宿主机的 Ollama（Windows/macOS 的 Docker Desktop 内置该域名）
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./materials:/app/materials:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: ai-kb-frontend:latest
+    container_name: ai-kb-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
