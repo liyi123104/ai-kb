@@ -320,7 +320,7 @@ def build_messages(hits: list[tuple], question: str) -> list[dict]:
     ]
 
 
-def answer(question: str, k: int | None = None, answer_top_n: int = 3) -> dict:
+def answer(question: str, k: int | None = None, answer_top_n: int | None = None) -> dict:
     """检索 + 生成，返回结构化结果（/chat 与评测脚本共用）。
 
     answer_top_n：喂给模型几条上下文。检索评估仍按 Top-K（默认 5）计算命中，
@@ -339,7 +339,7 @@ def answer(question: str, k: int | None = None, answer_top_n: int = 3) -> dict:
                 "best_score": round(best_score, 4), "gate": settings.score_gate,
                 "gated": True, "error": None}
 
-    context_hits = hits[:answer_top_n]
+    context_hits = hits[:answer_top_n or settings.answer_top_n]
     prompt = PROMPT_TEMPLATE.format(context=format_context(context_hits), question=question)
     resp = get_llm().invoke(prompt)
     text = resp.content if isinstance(resp.content, str) else str(resp.content)

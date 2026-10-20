@@ -71,6 +71,8 @@ class Settings:
     chunk_size: int = _get_int("CHUNK_SIZE", 512)
     chunk_overlap: int = _get_int("CHUNK_OVERLAP", 50)
     top_k: int = _get_int("TOP_K", 5)
+    # 喂给生成模型的上下文条数（检索指标仍按 top_k 统计）
+    answer_top_n: int = _get_int("ANSWER_TOP_N", 2)
     score_gate: float = _get_float("RAG_SCORE_GATE", 0.45)
 
     # ---- 存储 ----
