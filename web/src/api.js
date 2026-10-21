@@ -55,11 +55,11 @@ export function uploadFile(file, onProgress) {
  * @param {string} question
  * @param {{onSources:Function, onToken:Function, onDone:Function, signal?:AbortSignal}} handlers
  */
-export async function streamChat(question, { provider, onSources, onToken, onDone, signal }) {
+export async function streamChat(question, { provider, model, onSources, onToken, onDone, signal }) {
   const resp = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, provider }),
+    body: JSON.stringify({ question, provider, model }),
     signal
   })
   if (!resp.ok) {

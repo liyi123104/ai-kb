@@ -100,12 +100,22 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 
 ### 切换回答模型（界面上直接选）
 
-![云端模型](docs/screenshots/ui-cloud.png)
+![自动发现模型](docs/screenshots/ui-model-picker.png)
 
-左侧栏顶部有「回答模型」下拉框：
+左侧栏顶部有「回答模型」下拉框，**选项是自动发现的**：
+后端 `GET /providers` 会读取本机 Ollama 的 `/api/tags`，把已下载的生成模型逐个列出来
+（向量模型 bge-m3 会自动排除），再加上云端模型（配了有效 Key 才可选）。
 
-- **本地 qwen2.5:7b** —— 免费、离线，回答偏公式化；
-- **云端 deepseek-chat** —— 回答更自然、准确率更高（86.7% vs 76.7%），需联网并消耗少量 token。
+实测本机的下拉框长这样：
+
+```
+本地 qwen2.5:7b
+本地 deepseek-r1:7b
+云端 deepseek-chat
+```
+
+选中后前端把 `provider` 与 `model` 一起发给后端（例如 `{"provider":"ollama","model":"deepseek-r1:7b"}`），
+换模型不需要改 `.env`、不用重启。云端回答更自然（86.7% vs 76.7%），本地免费离线。
 
 后端对应 `POST /chat`、`/chat/stream` 的 `provider` 字段（`ollama` / `deepseek`），
 未传时用 `.env` 的 `LLM_PROVIDER`。云端未配置 Key 时下拉项自动置灰。
@@ -148,7 +158,8 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 | 项 | 行为 |
 |---|---|
 | Ollama 地址 | `.env` 里 `OLLAMA_BASE_URL=http://127.0.0.1:11434`，指本机 → 换设备自动跟随 |
-| 模型名 | 写死在 `.env`（`qwen2.5:7b`、`bge-m3:latest`）→ 新设备没拉同名模型会报 `model not found`，不会偷偷换成别的模型 |
+| 生成模型 | `.env` 里的只是**默认值**；界面上会自动列出本机所有已下载模型供选择，换设备后无需改配置 |
+| 向量模型 | 写死在 `.env`（`bge-m3:latest`）—— 换它会破坏 1024 维索引，因此不给选 |
 | 项目路径 | 全部相对项目根（`config.py` 用 `Path(__file__).parent.parent`）→ 换盘符/目录都不用改 |
 | 向量库 | 与 `bge-m3` 的 1024 维绑定 → **换 embedding 模型必须重建索引**；只换设备沿用同一模型则无影响 |
 

@@ -125,7 +125,7 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { deleteFile, fileUrl, getFiles, getProviders, streamChat, uploadFile } from '../api'
 
@@ -139,7 +139,17 @@ const uploading = ref(false)
 const uploadPercent = ref(0)
 const scrollRef = ref(null)
 const providers = ref([])
+// provider 下拉框里存的是 "provider:model" 形式的 id（如 ollama:qwen2.5:7b）
 const provider = ref('')
+const selectedProvider = computed(() => {
+  const id = provider.value || ''
+  return id.includes(':') ? id.split(':')[0] : (id || undefined)
+})
+const selectedModel = computed(() => {
+  const id = provider.value || ''
+  const i = id.indexOf(':')
+  return i >= 0 ? id.slice(i + 1) : undefined
+})
 
 const examples = [
   '什么是自注意力机制？',
@@ -233,7 +243,8 @@ async function send() {
   try {
     await streamChat(q, {
       // 把界面选择器里的模型传给后端：'ollama' 本地 / 'deepseek' 云端
-      provider: provider.value || undefined,
+      provider: selectedProvider.value,
+      model: selectedModel.value,
       onSources: (src) => {
         reply.sources = src
       },

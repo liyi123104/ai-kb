@@ -28,7 +28,8 @@ from langchain_openai import ChatOpenAI
 from app.config import settings
 
 
-def get_llm(temperature: float = 0.0, provider: str | None = None) -> BaseChatModel:
+def get_llm(temperature: float = 0.0, provider: str | None = None,
+            model: str | None = None) -> BaseChatModel:
     """返回聊天模型实例。provider 显式传入时优先（支持界面上临时切云端/本地）。
 
     参数
@@ -38,7 +39,7 @@ def get_llm(temperature: float = 0.0, provider: str | None = None) -> BaseChatMo
 
     if provider == "ollama":
         return ChatOllama(
-            model=settings.ollama_model,
+            model=model or settings.ollama_model,
             base_url=settings.ollama_base_url,
             temperature=temperature,
             # 常驻显存：默认 5 分钟就卸载，下次请求要重新加载（实测首字从 3s 退化到 20s）
@@ -52,7 +53,7 @@ def get_llm(temperature: float = 0.0, provider: str | None = None) -> BaseChatMo
                 "LLM_PROVIDER=deepseek 但没有配置 DEEPSEEK_API_KEY，请先在 .env 中填写"
             )
         return ChatOpenAI(
-            model=settings.deepseek_model,
+            model=model or settings.deepseek_model,
             base_url=settings.deepseek_base_url,
             api_key=settings.deepseek_api_key,
             temperature=temperature,

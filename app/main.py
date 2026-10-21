@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import urllib.request
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
@@ -100,6 +101,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(default=None, description="会话 ID，留空则新建")
     history: list[dict] | None = Field(default=None, description="历史消息（可选，前端回传）")
     provider: str | None = Field(default=None, description="模型来源：ollama（本地）/ deepseek（云端），留空用默认")
+    model: str | None = Field(default=None, description="具体模型名，如 qwen2.5:7b；留空用 .env 默认值")
 
 
 @app.get("/health")
@@ -116,11 +118,49 @@ def health() -> dict:
 
 @app.get("/providers")
 def providers() -> dict:
-    """返回可选模型列表，供前端下拉框使用。未配置 Key 的云端不会出现。"""
-    items = [{"id": "ollama", "label": f"本地 {settings.ollama_model}", "available": True}]
+    """自动发现本机 Ollama 里已下载的模型 + 云端模型，供前端下拉框选择。
+
+    id 格式为 "provider:model"（如 ollama:qwen2.5:7b），前端原样回传即可。
+    向量模型（bge-m3）不会出现在生成模型列表里，避免误选。
+    """
+    items: list[dict] = []
+    default_id = f"{settings.llm_provider}:"
+    embed_base = settings.ollama_embed_model.split(":")[0]
+
+    # 本机 Ollama 模型（连不上时退回配置里的默认模型，保证下拉框不空）
+    local_models: list[str] = []
+    try:
+        with urllib.request.urlopen(f"{settings.ollama_base_url}/api/tags", timeout=3) as resp:
+            for m in json.loads(resp.read()).get("models", []):
+                name = m.get("name", "")
+                if name and name.split(":")[0] != embed_base:
+                    local_models.append(name)
+    except Exception:  # noqa: BLE001 - Ollama 没起时不应让接口失败
+        local_models = [settings.ollama_model]
+
+    for name in local_models:
+        items.append({
+            "id": f"ollama:{name}",
+            "label": f"本地 {name}",
+            "provider": "ollama",
+            "model": name,
+            "available": True,
+        })
+
+    # 云端（配了有效 Key 才可用）
     cloud_ok = bool(settings.deepseek_api_key and settings.deepseek_api_key != "sk-xxxx")
-    items.append({"id": "deepseek", "label": f"云端 {settings.deepseek_model}", "available": cloud_ok})
-    return {"default": settings.llm_provider, "items": items}
+    items.append({
+        "id": f"deepseek:{settings.deepseek_model}",
+        "label": f"云端 {settings.deepseek_model}",
+        "provider": "deepseek",
+        "model": settings.deepseek_model,
+        "available": cloud_ok,
+    })
+
+    # 默认选中 .env 里配置的那一个
+    configured = f"{settings.llm_provider}:{settings.ollama_model if settings.llm_provider == 'ollama' else settings.deepseek_model}"
+    selected = configured if any(i["id"] == configured for i in items) else items[0]["id"]
+    return {"default": selected, "items": items}
 
 
 @app.post("/upload")
@@ -164,7 +204,7 @@ def chat(req: ChatRequest) -> dict:
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
-        result = rag.answer(req.question, provider=req.provider)
+        result = rag.answer(req.question, provider=req.provider, model=req.model)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"生成失败：{exc}") from exc
 
@@ -204,7 +244,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                 # 既保留「逐渐出现」的观感，又保证前端看到的是自然语言。
                 buffer = ""
                 first_sent = False
-                for piece in get_llm(provider=req.provider).stream(prompt):
+                for piece in get_llm(provider=req.provider, model=req.model).stream(prompt):
                     chunk = piece.content if isinstance(piece.content, str) else str(piece.content)
                     if not chunk:
                         continue
