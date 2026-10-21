@@ -141,6 +141,19 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 | GET | `/files/{name}/raw` | PDF/MD/TXT 内嵌打开（PDF 支持 `#page=N` 跳页） |
 | GET | `/files/{name}/view` | DOCX 转成 HTML 页面，浏览器内直接阅读（不下载） |
 
+## 打包分发
+
+```powershell
+.venv\Scripts\python.exe scripts\package.py
+```
+
+产物在 `dist/ai-kb-src-YYYYMMDD.zip`（约 0.7 MB、59 个文件）。
+包含：代码、脚本、前端源码、文档、测试集与评测结果、启动脚本、`.env.example`。
+**不含**：`.venv`、`node_modules`、向量库、语料、上传文件、`.env`
+（脚本内置检查，发现 `.env` 会直接拒绝打包）。
+
+拿到包的人解压后按「快速开始」重建环境即可。
+
 ## 项目结构
 
 ```text
