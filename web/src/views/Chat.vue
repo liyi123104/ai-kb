@@ -45,7 +45,9 @@
 
       <div class="file-list">
         <div v-for="f in files" :key="f.name" class="file-item">
-          <div class="file-name" :title="f.name">{{ f.name }}</div>
+          <div class="file-name" :title="`打开 ${f.name}`" @click="openFile(f.name)">
+            {{ f.name }} <span class="open-hint">↗</span>
+          </div>
           <div class="file-meta">
             {{ f.chunks }} 片 · {{ formatSize(f.size) }}
             <el-popconfirm title="删除该文件及其向量？" @confirm="removeFile(f.name)">
@@ -81,10 +83,17 @@
 
             <div v-if="m.sources && m.sources.length" class="sources">
               <div class="sources-title">出处</div>
-              <div v-for="s in m.sources" :key="s.index" class="source-item">
+              <div
+                v-for="s in m.sources"
+                :key="s.index"
+                class="source-item clickable"
+                :title="`打开 ${s.file} 第 ${s.page_start} 页`"
+                @click="openSource(s)"
+              >
                 <span class="file">{{ s.file }}</span>
                 <span class="page">PDF p.{{ s.page_label }}</span>
                 <span class="score">相似度 {{ s.score }}</span>
+                <span class="open-hint">打开 ↗</span>
                 <div class="snippet">{{ s.snippet }}</div>
               </div>
             </div>
@@ -118,7 +127,7 @@
 <script setup>
 import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { deleteFile, getFiles, getProviders, streamChat, uploadFile } from '../api'
+import { deleteFile, fileUrl, getFiles, getProviders, streamChat, uploadFile } from '../api'
 
 const files = ref([])
 const messages = ref([])
@@ -137,6 +146,15 @@ const examples = [
   'RAG 相比只用参数化知识有什么优势？',
   'bge-m3 输出多少维向量？'
 ]
+
+function openSource(source) {
+  // 浏览器内置 PDF 阅读器支持 #page=N，直接跳转到该页
+  window.open(fileUrl(source.file, source.page_start), '_blank')
+}
+
+function openFile(name) {
+  window.open(fileUrl(name), '_blank')
+}
 
 function formatSize(bytes) {
   if (!bytes) return '未知'
@@ -383,6 +401,19 @@ onMounted(() => {
   font-size: 12px;
   color: #606266;
   margin-bottom: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.source-item.clickable {
+  cursor: pointer;
+}
+.source-item.clickable:hover {
+  background: #f0f7ff;
+}
+.open-hint {
+  color: #409eff;
+  font-size: 11px;
+  margin-left: 4px;
 }
 .source-item .page {
   color: #409eff;

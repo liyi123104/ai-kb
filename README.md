@@ -17,6 +17,10 @@
 
 左侧是已入库资料（片数、大小、删除），右侧问答区给出答案与**出处卡片**（文件名 + PDF 页码 + 相似度 + 命中片段）。
 
+**出处可以点开**：点任意一条出处（或左侧文件名后的 ↗），浏览器会直接打开该 PDF
+并跳转到对应页（URL 形如 `/api/files/d2l-zh.pdf/raw#page=434`）。
+DOCX 浏览器无法内嵌渲染，会作为文件下载。
+
 ## 架构
 
 ```text
@@ -130,6 +134,7 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 | DELETE | `/files/{name}` | 删除文件及其向量 |
 | GET | `/sessions/{id}` | 按会话 ID 取回历史 |
 | GET | `/providers` | 可选模型列表（供界面下拉框） |
+| GET | `/files/{name}/raw` | 打开原始文件（PDF/MD/TXT 内嵌显示，DOCX 下载） |
 
 ## 项目结构
 

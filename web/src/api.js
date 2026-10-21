@@ -14,6 +14,16 @@ export function getProviders() {
   return http.get('/providers')
 }
 
+/**
+ * 已入库文件的访问地址。PDF 支持 #page=N 跳页（浏览器内置阅读器）。
+ * @param {string} name 文件名
+ * @param {number} [page] 页码（1 起）
+ */
+export function fileUrl(name, page) {
+  const base = `/api/files/${encodeURIComponent(name)}/raw`
+  return page ? `${base}#page=${page}` : base
+}
+
 export function getFiles() {
   return http.get('/files')
 }

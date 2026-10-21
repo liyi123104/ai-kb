@@ -23,7 +23,7 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import db, rag
@@ -276,6 +276,35 @@ def delete_file(name: str) -> dict:
     if removed == 0 and not deleted_file:
         raise HTTPException(status_code=404, detail=f"没有这个文件：{safe}")
     return {"ok": True, "removed_chunks": removed}
+
+
+MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".md": "text/plain; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+@app.get("/files/{name}/raw")
+def raw_file(name: str):
+    """把已入库的原始文件返回给浏览器。
+
+    PDF / MD / TXT 用 inline 打开（浏览器直接显示，PDF 可配合 #page=N 跳页）；
+    DOCX 浏览器无法渲染，用 attachment 下载。
+    """
+    safe = Path(name).name  # 防目录穿越
+    candidates = [settings.uploads_dir / safe, settings.data_dir.parent / "materials" / safe]
+    for path in candidates:
+        if path.is_file():
+            suffix = path.suffix.lower()
+            media = MEDIA_TYPES.get(suffix, "application/octet-stream")
+            inline = suffix in (".pdf", ".md", ".txt")
+            return FileResponse(
+                str(path), media_type=media, filename=safe,
+                content_disposition_type="inline" if inline else "attachment",
+            )
+    raise HTTPException(status_code=404, detail=f"文件不存在：{safe}")
 
 
 @app.get("/sessions")
