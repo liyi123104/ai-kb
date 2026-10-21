@@ -20,10 +20,14 @@
 from __future__ import annotations
 
 import json
+from html import escape
 from pathlib import Path
+from urllib.parse import quote
+
+from docx import Document
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import db, rag
@@ -305,6 +309,47 @@ def raw_file(name: str):
                 content_disposition_type="inline" if inline else "attachment",
             )
     raise HTTPException(status_code=404, detail=f"文件不存在：{safe}")
+
+
+@app.get("/files/{name}/view", response_class=HTMLResponse)
+def view_file(name: str):
+    """在浏览器里直接「看」文件，而不是下载。
+
+    PDF / MD / TXT 浏览器能自己渲染，直接重定向到 /raw；
+    DOCX 浏览器无法渲染，这里用 python-docx 转成 HTML 页面返回（标题/段落/列表保留）。
+    """
+    safe = Path(name).name
+    candidates = [settings.uploads_dir / safe, settings.data_dir.parent / "materials" / safe]
+    target = next((p for p in candidates if p.is_file()), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"文件不存在：{safe}")
+
+    if target.suffix.lower() != ".docx":
+        return RedirectResponse(url=f"/files/{quote(safe)}/raw")
+
+    doc = Document(str(target))
+    parts = [f"<!doctype html><html lang='zh'><head><meta charset='utf-8'>"
+             f"<title>{escape(safe)}</title><style>"
+             f"body{{max-width:860px;margin:32px auto;padding:0 20px;font:16px/1.8 -apple-system,'Segoe UI','Microsoft YaHei',sans-serif;color:#303133}}"
+             f"h1,h2,h3{{line-height:1.4}}table{{border-collapse:collapse;margin:12px 0}}"
+             f"td,th{{border:1px solid #dcdfe6;padding:6px 10px}}"
+             f"</style></head><body>"]
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+        style = (para.style.name or "").lower()
+        tag = "h2" if "heading 1" in style or style == "title" else (
+              "h3" if "heading" in style else "p")
+        parts.append(f"<{tag}>{escape(text)}</{tag}>")
+    for table in doc.tables:
+        parts.append("<table>")
+        for row in table.rows:
+            cells = "".join(f"<td>{escape(c.text.strip())}</td>" for c in row.cells)
+            parts.append(f"<tr>{cells}</tr>")
+        parts.append("</table>")
+    parts.append("</body></html>")
+    return HTMLResponse("".join(parts))
 
 
 @app.get("/sessions")

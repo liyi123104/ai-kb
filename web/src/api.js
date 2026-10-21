@@ -20,7 +20,13 @@ export function getProviders() {
  * @param {number} [page] 页码（1 起）
  */
 export function fileUrl(name, page) {
-  const base = `/api/files/${encodeURIComponent(name)}/raw`
+  const encoded = encodeURIComponent(name)
+  if (/\.docx$/i.test(name)) {
+    // DOCX 浏览器渲染不了，走后端转好的 HTML 页面（不会弹下载）
+    return `/api/files/${encoded}/view`
+  }
+  // PDF / MD / TXT 直接内嵌打开；PDF 用 #page=N 跳页（不再经过重定向，避免片段丢失）
+  const base = `/api/files/${encoded}/raw`
   return page ? `${base}#page=${page}` : base
 }
 
