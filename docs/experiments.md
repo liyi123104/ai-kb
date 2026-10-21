@@ -42,6 +42,21 @@ $env:CHROMA_COLLECTION='exp-1024'; $env:CHUNK_SIZE='1024'; $env:CHUNK_OVERLAP='5
 **结论：留 2 条。** 检索指标仍按 Top-5 统计（召回不变），但喂给模型的片段越少越干净；
 第 3 条往往是"擦边相关"的内容，反而诱导模型答偏。已把 `ANSWER_TOP_N` 默认值改为 2。
 
+## E6 生成模型：本地 qwen2.5:7b vs 云端 deepseek-chat — 已完成
+
+同一套检索（bge-m3 + Chroma，89 万字符语料）、同一批 30 题，只改 `LLM_PROVIDER`：
+
+| 模式 | 检索召回率 | 答案准确率 | 检索耗时 | 整轮耗时 |
+|---|---|---|---|---|
+| 本地 `qwen2.5:7b` | 90.0% | **83.3%**（25/30） | 0.52s | 3.6s |
+| 云端 `deepseek-chat` | 90.0% | **90.0%**（27/30） | 0.25s | 2.0s |
+
+**结论**：
+1. 检索质量与模型无关（召回率同为 90.0%），差异全在生成；云端准确率高 6.7 个百分点。
+2. 云端整轮快 1.6 秒，且不占显存、不占 CPU。
+3. 切换成本只有一行：`.env` 里 `LLM_PROVIDER=deepseek` 并填 `DEEPSEEK_API_KEY`。
+4. 默认仍用本地（免费、离线）；演示/录视频建议切云端。
+
 ## E3 Embedding 模型（bge-small / bge-m3 / bge-large）— 未执行
 
 需要额外拉取模型：`ollama pull bge-large`（约 1.2GB）、`ollama pull bge-small`（约 0.1GB）。
