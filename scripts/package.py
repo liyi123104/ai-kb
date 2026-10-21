@@ -3,8 +3,10 @@
 包含：代码、脚本、前端源码、文档、测试集与评测结果、启动脚本、配置模板。
 排除：虚拟环境、node_modules、向量库、语料、上传文件、浏览器临时目录、.env（含密钥）。
 
-用法：.venv\\Scripts\\python.exe scripts\\package.py
-产物：dist/ai-kb-src-YYYYMMDD.zip
+用法：
+  .venv\\Scripts\\python.exe scripts\\package.py          # 源码包（约 0.7MB）
+  .venv\\Scripts\\python.exe scripts\\package.py --full   # 完整包（含向量库与语料）
+产物：dist/ai-kb-src-YYYYMMDD.zip 或 dist/ai-kb-full-YYYYMMDD.zip
 """
 from __future__ import annotations
 
@@ -48,9 +50,15 @@ def should_skip(rel: Path) -> bool:
     return False
 
 
+# --full 时额外打进去的数据目录（向量库、原始语料、上传文件）
+FULL_DIRS = ["data/chroma", "data/uploads", "materials"]
+FULL = False  # 由 __main__ 根据命令行参数设置
+
+
 def collect() -> list[Path]:
     files: list[Path] = []
-    for d in INCLUDE_DIRS:
+    dirs = list(INCLUDE_DIRS) + (FULL_DIRS if FULL else [])
+    for d in dirs:
         base = ROOT / d
         if not base.exists():
             continue
@@ -66,7 +74,8 @@ def collect() -> list[Path]:
 
 def main() -> None:
     OUT_DIR.mkdir(exist_ok=True)
-    target = OUT_DIR / f"ai-kb-src-{date.today():%Y%m%d}.zip"
+    kind = "full" if FULL else "src"
+    target = OUT_DIR / f"ai-kb-{kind}-{date.today():%Y%m%d}.zip"
     files = collect()
 
     # 安全闸：绝不允许 .env 进包
@@ -74,9 +83,15 @@ def main() -> None:
     if leaked:
         raise SystemExit(f"拒绝打包：检测到 .env（{leaked}）")
 
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+    # PDF / 图片本身已压缩，再压没收益还慢，直接存储
+    STORED_SUFFIX = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".zip"}
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for f in files:
-            zf.write(f, arcname=f"ai-kb/{f.relative_to(ROOT).as_posix()}")
+            rel = f.relative_to(ROOT).as_posix()
+            if f.suffix.lower() in STORED_SUFFIX:
+                zf.write(f, arcname=f"ai-kb/{rel}", compress_type=zipfile.ZIP_STORED)
+            else:
+                zf.write(f, arcname=f"ai-kb/{rel}")
 
     size_mb = target.stat().st_size / 1024 / 1024
     print(f"产物：{target}")
@@ -106,4 +121,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
+    FULL = "--full" in sys.argv
     main()

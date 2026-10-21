@@ -152,6 +152,15 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 **不含**：`.venv`、`node_modules`、向量库、语料、上传文件、`.env`
 （脚本内置检查，发现 `.env` 会直接拒绝打包）。
 
+要「解压即用」（含 8,895 条向量库与 10 份语料）就打完整包：
+
+```powershell
+.venv\Scripts\python.exe scripts\package.py --full
+```
+
+产物 `dist/ai-kb-full-YYYYMMDD.zip`（约 378 MB）。解压后只需装依赖即可直接启动，
+不用重新入库（省约 48 分钟）；注意语料有版权，适合自己备份/迁移，不宜公开分发。
+
 拿到包的人解压后按「快速开始」重建环境即可。
 
 ## 项目结构
