@@ -22,7 +22,7 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
 NO_ANSWER = "资料中没有相关内容。"
 
-PROMPT_TEMPLATE = """你是一个严谨的知识库问答助手。请只依据【参考资料】回答【问题】。
+PROMPT_TEMPLATE = r"""你是一个严谨的知识库问答助手。请只依据【参考资料】回答【问题】。
 
 规则：
 1. 只使用参考资料中的信息，不要编造，不要引入资料之外的知识。
@@ -32,6 +32,11 @@ PROMPT_TEMPLATE = """你是一个严谨的知识库问答助手。请只依据�
    不要用只言片语拼凑答案，也不要先否定再答。
 5. 用与问题相同的语言回答（英文问题用英文答，中文问题用中文答）。
 6. 回答里用 [编号] 标注依据，例如「自注意力能并行计算 [2]」。
+7. **只写自然语言，不要输出任何 LaTeX 或数学标记**：不要出现 $...$、\( \)、\[ \]、
+   \mathbb、\ldots、\leq 之类的写法。需要表达公式时用文字描述，例如
+   「第 i 个输入是 d 维实数向量」「i 从 1 到 n」「x 的平方」。
+   原文中的符号可以用中文字符表达：≤ ≥ ∈ × ÷。
+   改写时**必须保留原文的关键数值、维度、层次数、术语**，不要因为改成自然语言而丢信息。
 
 【参考资料】
 {context}
@@ -344,9 +349,37 @@ def answer(question: str, k: int | None = None, answer_top_n: int | None = None)
     prompt = PROMPT_TEMPLATE.format(context=format_context(context_hits), question=question)
     resp = get_llm().invoke(prompt)
     text = resp.content if isinstance(resp.content, str) else str(resp.content)
-    return {"question": question, "answer": text.strip(), "sources": make_sources(hits),
+    return {"question": question, "answer": clean_answer(text), "sources": make_sources(hits),
             "best_score": round(best_score, 4), "gate": settings.score_gate,
             "gated": False, "error": None}
+
+
+_LATEX_MAP = {
+    r"\(": "", r"\)": "", r"\[": "", r"\]": "", r"\$": "",
+    r"\mathbb{R}": "R", r"\mathbb{N}": "N", r"\mathbb{Z}": "Z",
+    r"\ldots": "…", r"\dots": "…", r"\cdots": "…",
+    r"\leq": "≤", r"\geq": "≥", r"\in": "属于", r"\times": "×",
+    r"\sum": "求和", r"\prod": "连乘", r"\partial": "偏导",
+    r"\alpha": "α", r"\beta": "β", r"\gamma": "γ", r"\theta": "θ",
+    r"\lambda": "λ", r"\mu": "μ", r"\sigma": "σ",
+}
+_LATEX_TOKEN_RE = re.compile(r"\\[a-zA-Z]+")
+_MATH_DELIM_RE = re.compile(r"\$+")
+_CONTROL_RE = re.compile(r"\\[()\[\]$]")
+
+
+def clean_answer(text: str) -> str:
+    """把答案里残留的 LaTeX 标记清掉，保证输出是自然语言（prompt 已要求，这里是兜底）。"""
+    if not text:
+        return text
+    out = text
+    for k, v in _LATEX_MAP.items():
+        out = out.replace(k, v)
+    out = _CONTROL_RE.sub("", out)
+    out = _LATEX_TOKEN_RE.sub("", out)     # 剩余的 \xxx 命令直接删掉
+    out = _MATH_DELIM_RE.sub("", out)      # 去掉 $ 定界符
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out.strip()
 
 
 def now_iso() -> str:

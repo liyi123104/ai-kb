@@ -186,13 +186,32 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                 from app.llm import get_llm
 
                 _t1 = _t.perf_counter()
+                # 按句子边界流式推送：凑齐一句就清洗（去掉 LaTeX）再发出，
+                # 既保留「逐渐出现」的观感，又保证前端看到的是自然语言。
+                buffer = ""
+                first_sent = False
                 for piece in get_llm().stream(prompt):
-                    text = piece.content if isinstance(piece.content, str) else str(piece.content)
-                    if text:
-                        if not collected:
-                            print(f"[chat] first token {_t.perf_counter() - _t1:.2f}s", flush=True)
-                        collected.append(text)
-                        yield f"event: token\ndata: {json.dumps(text, ensure_ascii=False)}\n\n"
+                    chunk = piece.content if isinstance(piece.content, str) else str(piece.content)
+                    if not chunk:
+                        continue
+                    buffer += chunk
+                    cut = max(buffer.rfind("。"), buffer.rfind("！"), buffer.rfind("？"),
+                              buffer.rfind("\n"), buffer.rfind("；"))
+                    while cut >= 0:
+                        head, buffer = buffer[:cut + 1], buffer[cut + 1:]
+                        cleaned = rag.clean_answer(head)
+                        if cleaned:
+                            if not first_sent:
+                                print(f"[chat] first sentence {_t.perf_counter() - _t1:.2f}s", flush=True)
+                                first_sent = True
+                            collected.append(cleaned)
+                            yield f"event: token\ndata: {json.dumps(cleaned, ensure_ascii=False)}\n\n"
+                        cut = max(buffer.rfind("。"), buffer.rfind("！"), buffer.rfind("？"),
+                                  buffer.rfind("\n"), buffer.rfind("；"))
+                tail = rag.clean_answer(buffer)
+                if tail:
+                    collected.append(tail)
+                    yield f"event: token\ndata: {json.dumps(tail, ensure_ascii=False)}\n\n"
 
             session_id = db.save_turn(req.session_id or "", req.question,
                                       "".join(collected), sources, rag.now_iso())
