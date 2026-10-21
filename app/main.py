@@ -75,11 +75,15 @@ def warm_up_models() -> None:
                 headers={"Content-Type": "application/json"})
             urllib.request.urlopen(req, timeout=120).read()
 
+        keep_chat = _s.llm_provider.lower() == "ollama"
         while True:
             try:
                 embedder.embed_query("保活")
-                _keep_chat_alive()
-                print("[warmup] 模型保活完成", flush=True)
+                # 只有本地生成时才需要保活聊天模型；云端生成时保活它会白占 4.4GB 显存，
+                # 把向量模型挤出 GPU（实测导致每次检索多花 2 秒）。
+                if keep_chat:
+                    _keep_chat_alive()
+                print(f"[warmup] 保活完成（chat={'on' if keep_chat else 'off'}）", flush=True)
             except Exception as exc:  # noqa: BLE001 - 预热失败不应影响服务
                 print(f"[warmup] 预热跳过：{exc}", flush=True)
             time.sleep(240)  # 4 分钟一次，短于 Ollama 默认 5 分钟卸载阈值

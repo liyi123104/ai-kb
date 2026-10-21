@@ -40,7 +40,7 @@
 | T3.1 Streamlit | ✅ | `ui_streamlit.py`：8501 可访问，`/_stcore/health` = ok |
 | T3.2 Vue3 初始化 | ✅ | `npm install` 83 包；`npm run build` 1657 模块通过；dev 绑 127.0.0.1:5173；`/api/health` 代理通 |
 | T3.3 前端主界面 | ✅ | 截图 `docs/screenshots/ui-home.png`：左侧 10 个文件（片数/大小/删除）、右侧引导与输入框 |
-| T3.4 流式对接 | ✅（延迟记为已知限制） | 功能通过：截图 `ui-answer.png` 显示答案逐字渲染 + 5 条出处卡片；首 token 热态 3.5–6s，未达 ≤3s → 经确认接受现状，写入 `baseline.md` 第 8 节与 README 已知限制 |
+| T3.4 流式对接 | ✅ | 截图 `ui-answer.png` 证明逐字渲染 + 5 条出处卡片；**首 token 中位 1.23s（最大 1.84s），整轮中位 2.75s，F5 两项均达标** |
 | T3.5 联调与异常 | ✅ | 空问题 400、非法类型 400、超大文件 413（代码路径）、后端未启动前端给可读提示 |
 
 ## M4 测试集与基线

@@ -50,7 +50,7 @@ class Settings:
     llm_provider: str = _get("LLM_PROVIDER", "ollama")          # ollama | deepseek
     ollama_model: str = _get("OLLAMA_MODEL", "qwen2.5:7b")
     ollama_embed_model: str = _get("OLLAMA_EMBED_MODEL", "bge-m3:latest")
-    ollama_base_url: str = _get("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_base_url: str = _get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     # 让模型常驻显存：默认 Ollama 5 分钟就卸载，下一次请求要重新加载（实测 +17 秒）
     # ChatOllama 接受 "30m" 这样的字符串，OllamaEmbeddings 只接受整数秒，故拆成两个字段。
     ollama_keep_alive: str = _get("OLLAMA_KEEP_ALIVE", "30m")
@@ -94,3 +94,20 @@ class Settings:
 
 settings = Settings()
 settings.ensure_dirs()
+
+
+def _auto_embed_device(s: Settings) -> None:
+    """向量模型放哪块设备，按生成方式自动决定（显式设置环境变量则不覆盖）。
+
+    为什么：6GB 显存装不下 qwen2.5:7b(4.4G) + bge-m3(1.2G) 同时驻留。
+      - 本地生成（ollama）时，把显存留给生成模型，向量走 CPU（默认）；
+      - 云端生成（deepseek）时本机不跑生成模型，向量放回 GPU，单条嵌入 0.15s。
+    """
+    import os as _os
+
+    if _os.getenv("OLLAMA_EMBED_NUM_GPU") is not None:
+        return
+    s.ollama_embed_num_gpu = -1 if s.llm_provider.lower() == "deepseek" else 0
+
+
+_auto_embed_device(settings)
