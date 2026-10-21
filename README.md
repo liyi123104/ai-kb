@@ -90,6 +90,18 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 
 > 说明：本机当前未安装 Docker，这一项**尚未实机验证**，验证后再更新本段。
 
+### 切换回答模型（界面上直接选）
+
+![云端模型](docs/screenshots/ui-cloud.png)
+
+左侧栏顶部有「回答模型」下拉框：
+
+- **本地 qwen2.5:7b** —— 免费、离线，回答偏公式化；
+- **云端 deepseek-chat** —— 回答更自然、准确率更高（86.7% vs 76.7%），需联网并消耗少量 token。
+
+后端对应 `POST /chat`、`/chat/stream` 的 `provider` 字段（`ollama` / `deepseek`），
+未传时用 `.env` 的 `LLM_PROVIDER`。云端未配置 Key 时下拉项自动置灰。
+
 ## 配置（`.env`）
 
 | 键 | 默认 | 说明 |
@@ -117,6 +129,7 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 | GET | `/files` | 已入库文件（文件名、大小、切片数） |
 | DELETE | `/files/{name}` | 删除文件及其向量 |
 | GET | `/sessions/{id}` | 按会话 ID 取回历史 |
+| GET | `/providers` | 可选模型列表（供界面下拉框） |
 
 ## 项目结构
 

@@ -28,9 +28,13 @@ from langchain_openai import ChatOpenAI
 from app.config import settings
 
 
-def get_llm(temperature: float = 0.0) -> BaseChatModel:
-    """按配置返回聊天模型实例。provider 不认识时抛 ValueError，不静默兜底。"""
-    provider = settings.llm_provider.lower()
+def get_llm(temperature: float = 0.0, provider: str | None = None) -> BaseChatModel:
+    """返回聊天模型实例。provider 显式传入时优先（支持界面上临时切云端/本地）。
+
+    参数
+        provider: "ollama" 或 "deepseek"；None 时用 .env 的 LLM_PROVIDER
+    """
+    provider = (provider or settings.llm_provider).lower()
 
     if provider == "ollama":
         return ChatOllama(

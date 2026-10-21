@@ -36,6 +36,8 @@ PROMPT_TEMPLATE = r"""你是一个严谨的知识库问答助手。请只依据�
    \mathbb、\ldots、\leq 之类的写法。需要表达公式时用文字描述，例如
    「第 i 个输入是 d 维实数向量」「i 从 1 到 n」「x 的平方」。
    原文中的符号可以用中文字符表达：≤ ≥ ∈ × ÷。
+   同时不要用下标/上标写法（如 x_i、R^d、O(n^2)、y_1），改用文字：
+   「第 i 个输入」「d 维实数向量」「关于序列长度平方的复杂度」「第一个输出」。
    改写时**必须保留原文的关键数值、维度、层次数、术语**，不要因为改成自然语言而丢信息。
 
 【参考资料】
@@ -326,7 +328,8 @@ def build_messages(hits: list[tuple], question: str) -> list[dict]:
     ]
 
 
-def answer(question: str, k: int | None = None, answer_top_n: int | None = None) -> dict:
+def answer(question: str, k: int | None = None, answer_top_n: int | None = None,
+           provider: str | None = None) -> dict:
     """检索 + 生成，返回结构化结果（/chat 与评测脚本共用）。
 
     answer_top_n：喂给模型几条上下文。检索评估仍按 Top-K（默认 5）计算命中，
@@ -347,7 +350,7 @@ def answer(question: str, k: int | None = None, answer_top_n: int | None = None)
 
     context_hits = hits[:answer_top_n or settings.answer_top_n]
     prompt = PROMPT_TEMPLATE.format(context=format_context(context_hits), question=question)
-    resp = get_llm().invoke(prompt)
+    resp = get_llm(provider=provider).invoke(prompt)
     text = resp.content if isinstance(resp.content, str) else str(resp.content)
     return {"question": question, "answer": clean_answer(text), "sources": make_sources(hits),
             "best_score": round(best_score, 4), "gate": settings.score_gate,

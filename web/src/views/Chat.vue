@@ -4,6 +4,19 @@
     <el-aside width="320px" class="aside">
       <div class="brand">📚 AI 学习资料知识库</div>
 
+      <div class="model-picker">
+        <div class="picker-label">回答模型</div>
+        <el-select v-model="provider" size="small" style="width: 100%">
+          <el-option
+            v-for="p in providers"
+            :key="p.id"
+            :label="p.label"
+            :value="p.id"
+            :disabled="!p.available"
+          />
+        </el-select>
+      </div>
+
       <el-upload
         class="uploader"
         drag
@@ -105,7 +118,7 @@
 <script setup>
 import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { deleteFile, getFiles, streamChat, uploadFile } from '../api'
+import { deleteFile, getFiles, getProviders, streamChat, uploadFile } from '../api'
 
 const files = ref([])
 const messages = ref([])
@@ -116,6 +129,8 @@ const currentAnswer = ref('')
 const uploading = ref(false)
 const uploadPercent = ref(0)
 const scrollRef = ref(null)
+const providers = ref([])
+const provider = ref('')
 
 const examples = [
   '什么是自注意力机制？',
@@ -199,6 +214,8 @@ async function send() {
 
   try {
     await streamChat(q, {
+      // 把界面选择器里的模型传给后端：'ollama' 本地 / 'deepseek' 云端
+      provider: provider.value || undefined,
       onSources: (src) => {
         reply.sources = src
       },
@@ -221,10 +238,31 @@ async function send() {
   }
 }
 
-onMounted(loadFiles)
+async function loadProviders() {
+  try {
+    const { data } = await getProviders()
+    providers.value = data.items
+    provider.value = data.default
+  } catch (err) {
+    // 旧后端没有 /providers 时不影响主流程
+  }
+}
+
+onMounted(() => {
+  loadProviders()
+  loadFiles()
+})
 </script>
 
 <style scoped>
+.model-picker {
+  margin-bottom: 12px;
+}
+.picker-label {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
 .layout {
   height: 100vh;
 }

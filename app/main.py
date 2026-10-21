@@ -95,6 +95,7 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, description="用户问题")
     session_id: str | None = Field(default=None, description="会话 ID，留空则新建")
     history: list[dict] | None = Field(default=None, description="历史消息（可选，前端回传）")
+    provider: str | None = Field(default=None, description="模型来源：ollama（本地）/ deepseek（云端），留空用默认")
 
 
 @app.get("/health")
@@ -107,6 +108,15 @@ def health() -> dict:
     return {"status": "ok", "chunks": count, "provider": settings.llm_provider,
             "chat_model": settings.ollama_model if settings.llm_provider == "ollama"
             else settings.deepseek_model}
+
+
+@app.get("/providers")
+def providers() -> dict:
+    """返回可选模型列表，供前端下拉框使用。未配置 Key 的云端不会出现。"""
+    items = [{"id": "ollama", "label": f"本地 {settings.ollama_model}", "available": True}]
+    cloud_ok = bool(settings.deepseek_api_key and settings.deepseek_api_key != "sk-xxxx")
+    items.append({"id": "deepseek", "label": f"云端 {settings.deepseek_model}", "available": cloud_ok})
+    return {"default": settings.llm_provider, "items": items}
 
 
 @app.post("/upload")
@@ -150,7 +160,7 @@ def chat(req: ChatRequest) -> dict:
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
-        result = rag.answer(req.question)
+        result = rag.answer(req.question, provider=req.provider)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"生成失败：{exc}") from exc
 
@@ -190,7 +200,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                 # 既保留「逐渐出现」的观感，又保证前端看到的是自然语言。
                 buffer = ""
                 first_sent = False
-                for piece in get_llm().stream(prompt):
+                for piece in get_llm(provider=req.provider).stream(prompt):
                     chunk = piece.content if isinstance(piece.content, str) else str(piece.content)
                     if not chunk:
                         continue
