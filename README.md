@@ -141,6 +141,31 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 | GET | `/files/{name}/raw` | PDF/MD/TXT 内嵌打开（PDF 支持 `#page=N` 跳页） |
 | GET | `/files/{name}/view` | DOCX 转成 HTML 页面，浏览器内直接阅读（不下载） |
 
+## 换设备 / 迁移
+
+**会自动连接新设备的本地模型，但不会自动"发现"模型名。** 具体：
+
+| 项 | 行为 |
+|---|---|
+| Ollama 地址 | `.env` 里 `OLLAMA_BASE_URL=http://127.0.0.1:11434`，指本机 → 换设备自动跟随 |
+| 模型名 | 写死在 `.env`（`qwen2.5:7b`、`bge-m3:latest`）→ 新设备没拉同名模型会报 `model not found`，不会偷偷换成别的模型 |
+| 项目路径 | 全部相对项目根（`config.py` 用 `Path(__file__).parent.parent`）→ 换盘符/目录都不用改 |
+| 向量库 | 与 `bge-m3` 的 1024 维绑定 → **换 embedding 模型必须重建索引**；只换设备沿用同一模型则无影响 |
+
+迁移步骤：
+
+```powershell
+# 1) 新设备装 Ollama 并拉模型
+ollama pull qwen2.5:7b
+ollama pull bge-m3
+
+# 2) 拷项目（用完整包可连向量库和语料一起带走）
+# 3) 一键自检，缺什么它会直接告诉你
+.venv\Scripts\python.exe scripts\check_env.py
+```
+
+`start.bat` 启动前会自动跑这个自检；不通过会列明补法（例如 `ollama pull xxx`）并询问是否继续。
+
 ## 打包分发
 
 ```powershell

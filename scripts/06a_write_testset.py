@@ -105,7 +105,7 @@ ROWS = [
      "slp3-语音与语言处理第3版草稿.pdf", 145),
 ]
 
-out = Path(r"D:\ai-kb\data\testset.csv")
+out = Path(__file__).resolve().parent.parent / "data" / "testset.csv"
 with out.open("w", newline="", encoding="utf-8-sig") as fh:
     writer = csv.writer(fh)
     writer.writerow(["id", "question", "expected_answer", "expected_source", "expected_page"])

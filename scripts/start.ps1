@@ -2,6 +2,12 @@
 # 用法：双击同目录的 start.bat（它会用 Bypass 执行策略调用本脚本）
 
 $ErrorActionPreference = 'SilentlyContinue'
+# 让 Python 的中文输出在 cmd/PowerShell 控制台正常显示（否则是乱码）
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $env:PYTHONIOENCODING = 'utf-8'
+    chcp 65001 > $null
+} catch { }
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
@@ -18,6 +24,19 @@ function Wait-Url($url, $seconds, $name) {
 }
 
 Write-Host "=== AI 学习资料知识库 启动中 ===" -ForegroundColor Cyan
+
+# 先跑环境自检：缺模型/缺向量库会给出具体补法
+$pyCheck = Join-Path $root '.venv\Scripts\python.exe'
+if (Test-Path $pyCheck) {
+    & $pyCheck (Join-Path $root 'scripts\check_env.py')
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "自检未通过（见上方提示）。是否继续启动？" -ForegroundColor Yellow
+        $ans = Read-Host "继续请输入 y"
+        if ($ans -ne 'y') { exit 1 }
+        Write-Host ""
+    }
+}
 
 # 1) Ollama
 if (-not (Get-Process -Name 'ollama app' -ErrorAction SilentlyContinue)) {
@@ -71,12 +90,12 @@ try {
 if (-not $frontendUp) {
     if (-not (Test-Path (Join-Path $root 'web\node_modules'))) {
         Write-Host "前端依赖未安装，请先执行：" -ForegroundColor Yellow
-        Write-Host "  cd D:\ai-kb\web; npm install --registry=https://registry.npmmirror.com" -ForegroundColor Yellow
+        Write-Host "  cd $root\web; npm install --registry=https://registry.npmmirror.com" -ForegroundColor Yellow
         Read-Host "按回车退出"
         exit 1
     }
     Write-Host "[3/3] 启动前端 ..."
-    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'cd /d D:\ai-kb\web && npm run dev' -WindowStyle Hidden
+    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "cd /d `"$root\web`" && npm run dev" -WindowStyle Hidden
     if (-not (Wait-Url 'http://127.0.0.1:5173' 60 '前端 5173')) {
         Read-Host "前端启动失败，按回车退出"
         exit 1
