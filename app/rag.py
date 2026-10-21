@@ -316,6 +316,8 @@ def make_sources(hits: list[tuple]) -> list[dict]:
             "page_label": page_label(md),
             "score": round(1 - float(distance), 4),
             "snippet": re.sub(r"\s+", " ", doc.page_content.strip())[:100],
+            # 完整片段（截断 600 字）：前端点开原文时用它逐句定位高亮
+            "text": re.sub(r"\s+", " ", doc.page_content.strip())[:600],
         })
     return out
 

@@ -21,8 +21,11 @@
 
 左侧是已入库资料（片数、大小、删除），右侧问答区给出答案与**出处卡片**（文件名 + PDF 页码 + 相似度 + 命中片段）。
 
-**出处可以点开**：点任意一条出处（或左侧文件名后的 ↗），浏览器会直接打开该 PDF
-并跳转到对应页（URL 形如 `/api/files/d2l-zh.pdf/raw#page=434`）。
+**出处可以点开并高亮命中位置**：点任意一条出处，后端用 PyMuPDF 在该页搜索命中片段、
+逐句按与问题的相关度排序，给最相关的句子加**黄色高亮**，再把整份 PDF 交给浏览器打开并跳到该页
+（URL 形如 `/api/files/d2l-zh.pdf/highlight?page=434&q=...&question=...#page=434`）。
+
+![PDF 高亮](docs/screenshots/pdf-highlight.png)
 DOCX 浏览器渲染不了，由后端转成网页直接阅读（见截图）。
 
 ## 架构
@@ -150,6 +153,7 @@ Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（c
 | GET | `/providers` | 可选模型列表（供界面下拉框） |
 | GET | `/files/{name}/raw` | PDF/MD/TXT 内嵌打开（PDF 支持 `#page=N` 跳页） |
 | GET | `/files/{name}/view` | DOCX 转成 HTML 页面，浏览器内直接阅读（不下载） |
+| GET | `/files/{name}/highlight` | PDF 在命中句子处打黄色高亮后返回（`page`/`q`/`question`） |
 
 ## 换设备 / 迁移
 

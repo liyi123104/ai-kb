@@ -351,6 +351,97 @@ def raw_file(name: str):
     raise HTTPException(status_code=404, detail=f"文件不存在：{safe}")
 
 
+@app.get("/files/{name}/highlight")
+def highlight_file(name: str, page: int = 1, q: str = "", question: str = "") -> FileResponse:
+    """打开 PDF 并**在命中位置打黄色高亮**，再交给浏览器显示。
+
+    做法：用 PyMuPDF 在第 page 页上搜命中片段（由长到短逐级降级匹配），
+    给搜到的文本加 highlight 注释，另存到 data/tmp/highlight 缓存后返回。
+    q 为空或搜不到时原样返回该页所在的 PDF（只跳页、不标记）。
+    """
+    safe = Path(name).name
+    candidates = [settings.uploads_dir / safe, settings.data_dir.parent / "materials" / safe]
+    target = next((p for p in candidates if p.is_file()), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"文件不存在：{safe}")
+    if target.suffix.lower() != ".pdf":
+        # 非 PDF 没有"页"的概念，直接走阅读视图
+        return RedirectResponse(url=f"/files/{quote(safe)}/view")
+
+    import hashlib
+
+    import pymupdf
+
+    cache_dir = settings.data_dir / "tmp" / "highlight"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha1(f"{safe}|{target.stat().st_mtime_ns}|{page}|{q}".encode()).hexdigest()[:16]
+    cached = cache_dir / f"{key}.pdf"
+
+    if not cached.exists():
+        doc = pymupdf.open(str(target))
+        page_no = max(1, min(page, doc.page_count))
+        pg = doc[page_no - 1]
+
+        # 逐句搜索并高亮：一段里通常只有一两句是真正相关的，
+        # 整段一次搜往往匹配不上（PDF 里有换行/公式），所以拆句降级匹配。
+        hit_count = 0
+        for needle in _search_needles(q, question):
+            if hit_count >= 8:
+                break
+            rects = pg.search_for(needle)
+            if not rects:
+                continue
+            for rect in rects[:3]:
+                annot = pg.add_highlight_annot(rect)
+                annot.set_colors(stroke=(1, 1, 0))  # 黄色
+                annot.update()
+                hit_count += 1
+
+        doc.save(str(cached), deflate=True, garbage=3)
+        doc.close()
+        print(f"[highlight] {safe} p.{page_no} 命中 {hit_count} 处", flush=True)
+
+    return FileResponse(str(cached), media_type="application/pdf", filename=safe,
+                        content_disposition_type="inline")
+
+
+def _search_needles(q: str, question: str = "") -> list[str]:
+    """把片段拆成可搜索的句子；有原始问题时按相关度排序，优先高亮更相关的句子。"""
+    import re
+
+    text = re.sub(r"\s+", " ", q or "").strip()
+    if not text:
+        return []
+    outs: list[str] = []
+    # 按中英文句末标点切句，只保留信息量足够的句子
+    for sentence in re.split(r"(?<=[。！？；.!?;])\s*", text):
+        s = sentence.strip()
+        if len(s) >= 10:
+            outs.append(s)
+    outs.append(text)
+    # 长句再截短一档，提高命中率（PDF 里常有换行折断）
+    for s in list(outs):
+        if len(s) > 60:
+            outs.append(s[:60].strip())
+    seen, uniq = set(), []
+    for s in outs:
+        if len(s) >= 8 and s not in seen:
+            seen.add(s)
+            uniq.append(s)
+    if question:
+        # 用「与问题的二元字符重叠」粗排相关度：命中的句子越贴近问题越先高亮，
+        # 这样正文里的解释句会排在代码块前面。
+        q_chars = {question[i:i + 2] for i in range(len(question) - 1)}
+        def score(s: str) -> float:
+            s_chars = {s[i:i + 2] for i in range(len(s) - 1)}
+            overlap = len(q_chars & s_chars)
+            return overlap / (len(s_chars) or 1)
+        uniq.sort(key=lambda s: (-score(s), -len(s)))
+    else:
+        uniq.sort(key=len, reverse=True)
+    return uniq[:12]
+
+
 @app.get("/files/{name}/view", response_class=HTMLResponse)
 def view_file(name: str):
     """在浏览器里直接「看」文件，而不是下载。

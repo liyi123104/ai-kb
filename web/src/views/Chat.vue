@@ -88,7 +88,7 @@
                 :key="s.index"
                 class="source-item clickable"
                 :title="`打开 ${s.file} 第 ${s.page_start} 页`"
-                @click="openSource(s)"
+                @click="openSource(s, m.question)"
               >
                 <span class="file">{{ s.file }}</span>
                 <span class="page">PDF p.{{ s.page_label }}</span>
@@ -157,9 +157,9 @@ const examples = [
   'bge-m3 输出多少维向量？'
 ]
 
-function openSource(source) {
+function openSource(source, question) {
   // 浏览器内置 PDF 阅读器支持 #page=N，直接跳转到该页
-  window.open(fileUrl(source.file, source.page_start), '_blank')
+  window.open(fileUrl(source.file, source.page_start, source.text || source.snippet, question), '_blank')
 }
 
 function openFile(name) {
@@ -236,7 +236,7 @@ async function send() {
   streaming.value = true
   currentAnswer.value = ''
 
-  const reply = { role: 'assistant', content: '', sources: [] }
+  const reply = { role: 'assistant', content: '', sources: [], question: q }
   messages.value.push(reply)
   await scrollToBottom()
 

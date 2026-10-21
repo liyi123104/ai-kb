@@ -19,13 +19,19 @@ export function getProviders() {
  * @param {string} name 文件名
  * @param {number} [page] 页码（1 起）
  */
-export function fileUrl(name, page) {
+export function fileUrl(name, page, snippet, question) {
   const encoded = encodeURIComponent(name)
   if (/\.docx$/i.test(name)) {
     // DOCX 浏览器渲染不了，走后端转好的 HTML 页面（不会弹下载）
     return `/api/files/${encoded}/view`
   }
-  // PDF / MD / TXT 直接内嵌打开；PDF 用 #page=N 跳页（不再经过重定向，避免片段丢失）
+  if (/\.pdf$/i.test(name) && snippet) {
+    // PDF：后端在命中位置打黄色高亮，再把整份 PDF 内嵌打开并跳到该页
+    const q = encodeURIComponent(snippet)
+    const ask = question ? `&question=${encodeURIComponent(question)}` : ''
+    return `/api/files/${encoded}/highlight?page=${page || 1}&q=${q}${ask}#page=${page || 1}`
+  }
+  // PDF / MD / TXT 直接内嵌打开；PDF 用 #page=N 跳页
   const base = `/api/files/${encoded}/raw`
   return page ? `${base}#page=${page}` : base
 }
