@@ -12,6 +12,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # 国内网络可设 BASE_IMAGE=docker.m.daocloud.io/library/python:3.12-slim
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.12-slim}
     image: ai-kb-backend:latest
     container_name: ai-kb-backend
     restart: unless-stopped
@@ -40,6 +43,9 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-alpine}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.27-alpine}
     image: ai-kb-frontend:latest
     container_name: ai-kb-frontend
     restart: unless-stopped

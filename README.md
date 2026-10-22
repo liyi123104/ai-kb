@@ -99,35 +99,38 @@ ollama pull qwen2.5:7b
 ## Docker（可选）
 
 ```powershell
-docker compose up -d --build
-# 前端 http://localhost/    后端 http://localhost:8000/docs
+docker compose up -d --build      # 前端 http://localhost  后端 http://localhost:8000
+docker compose logs -f backend    # 看日志
+docker compose down               # 停止
 ```
 
-Ollama 仍跑在宿主机，容器通过 `host.docker.internal:11434` 访问（compose 已配好）。
+**实测结果（本机 Docker Desktop 29.9.2）**
 
-> 说明：本机当前未安装 Docker，这一项**尚未实机验证**，验证后再更新本段。
+| 项 | 结果 |
+|---|---|
+| 后端镜像 | 1.29 GB，容器状态 healthy |
+| 前端镜像 | Nginx 托管，80 端口返回 200 |
+| 向量库 | 挂载 `./data`，容器内读到 8,895 条；重启容器后仍在 |
+| 接口 | 经 Nginx 反代上传 / 问答 / 流式 / 删除全部通过 |
+| PDF 高亮 | 容器内 PyMuPDF 正常（8 个注释，1.2s） |
 
-### 切换回答模型（界面上直接选）
+**两个必需的处理**
 
-![自动发现模型](docs/screenshots/ui-model-picker.png)
+1. **国内拉不到 Docker Hub**：基础镜像可用镜像站覆盖
 
-左侧栏顶部有「回答模型」下拉框，**选项是自动发现的**：
-后端 `GET /providers` 会读取本机 Ollama 的 `/api/tags`，把已下载的生成模型逐个列出来
-（向量模型 bge-m3 会自动排除），再加上云端模型（配了有效 Key 才可选）。
+   ```powershell
+   $env:BASE_IMAGE="docker.m.daocloud.io/library/python:3.12-slim"
+   $env:NODE_IMAGE="docker.m.daocloud.io/library/node:24-alpine"
+   $env:NGINX_IMAGE="docker.m.daocloud.io/library/nginx:1.27-alpine"
+   docker compose build
+   ```
 
-实测本机的下拉框长这样：
+2. **镜像依赖做了精简**（`requirements-docker.txt`）：去掉 torch / sentence-transformers /
+   transformers / streamlit 及其依赖。原因：embedding 走 Ollama，代码里没有任何相关 import，
+   而 `sentence-transformers` 会强制拉 554 MB 的 torch。镜像因此从预计 4 GB+ 降到 1.29 GB。
 
-```
-本地 qwen2.5:7b
-本地 deepseek-r1:7b
-云端 deepseek-chat
-```
-
-选中后前端把 `provider` 与 `model` 一起发给后端（例如 `{"provider":"ollama","model":"deepseek-r1:7b"}`），
-换模型不需要改 `.env`、不用重启。云端回答更自然（86.7% vs 76.7%），本地免费离线。
-
-后端对应 `POST /chat`、`/chat/stream` 的 `provider` 字段（`ollama` / `deepseek`），
-未传时用 `.env` 的 `LLM_PROVIDER`。云端未配置 Key 时下拉项自动置灰。
+**已知差异**：容器内问答约 13–22 秒，比本机（3–5 秒）慢 2–4 倍。检索只占 0.24 秒，
+慢在生成——Docker Desktop 的 WSL2 虚拟机会和宿主机抢 CPU。真实 Linux 服务器上不会有这个问题。
 
 ## 配置（`.env`）
 
