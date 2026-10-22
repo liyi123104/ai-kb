@@ -159,7 +159,7 @@ const examples = [
 
 function openSource(source, question) {
   // 浏览器内置 PDF 阅读器支持 #page=N，直接跳转到该页
-  window.open(fileUrl(source.file, source.page_start, source.text || source.snippet, question), '_blank')
+  window.open(fileUrl(source.file, source.page_start, source.text || source.snippet, question, source.page_end), '_blank')
 }
 
 function openFile(name) {

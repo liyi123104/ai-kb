@@ -352,12 +352,14 @@ def raw_file(name: str):
 
 
 @app.get("/files/{name}/highlight")
-def highlight_file(name: str, page: int = 1, q: str = "", question: str = "") -> FileResponse:
+def highlight_file(name: str, page: int = 1, page_end: int | None = None,
+                   q: str = "", question: str = "") -> FileResponse:
     """打开 PDF 并**在命中位置打黄色高亮**，再交给浏览器显示。
 
-    做法：用 PyMuPDF 在第 page 页上搜命中片段（由长到短逐级降级匹配），
+    做法：用 PyMuPDF 在 page（跨页片段会继续看 page_end）上搜命中片段，
     给搜到的文本加 highlight 注释，另存到 data/tmp/highlight 缓存后返回。
-    q 为空或搜不到时原样返回该页所在的 PDF（只跳页、不标记）。
+    **只有真正标上高亮才写缓存** —— 否则匹配失败的结果会被缓存下来，
+    下次点同一条出处就再也看不到标记了（这就是之前“高亮消失”的原因）。
     """
     safe = Path(name).name
     candidates = [settings.uploads_dir / safe, settings.data_dir.parent / "materials" / safe]
@@ -372,35 +374,57 @@ def highlight_file(name: str, page: int = 1, q: str = "", question: str = "") ->
 
     import pymupdf
 
+    # 缓存版本号：算法或规则改了就加一，旧缓存自然失效
+    CACHE_VERSION = "v3"
     cache_dir = settings.data_dir / "tmp" / "highlight"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = hashlib.sha1(f"{safe}|{target.stat().st_mtime_ns}|{page}|{q}".encode()).hexdigest()[:16]
+    key_src = f"{CACHE_VERSION}|{safe}|{target.stat().st_mtime_ns}|{page}|{page_end}|{q}"
+    key = hashlib.sha1(key_src.encode()).hexdigest()[:16]
     cached = cache_dir / f"{key}.pdf"
 
-    if not cached.exists():
-        doc = pymupdf.open(str(target))
-        page_no = max(1, min(page, doc.page_count))
-        pg = doc[page_no - 1]
+    if cached.exists():
+        return FileResponse(str(cached), media_type="application/pdf", filename=safe,
+                            content_disposition_type="inline")
 
-        # 逐句搜索并高亮：一段里通常只有一两句是真正相关的，
-        # 整段一次搜往往匹配不上（PDF 里有换行/公式），所以拆句降级匹配。
-        hit_count = 0
-        for needle in _search_needles(q, question):
+    doc = pymupdf.open(str(target))
+    page_no = max(1, min(page, doc.page_count))
+    last_page = max(page_no, min(page_end or page_no, doc.page_count, page_no + 2))
+
+    # 逐句搜索并高亮：一段里通常只有一两句是真正相关的，整段一次搜往往匹配不上
+    # （PDF 里有换行/公式），所以拆句降级匹配；当前页没命中就看下一页（跨页片段）。
+    hit_count = 0
+    hit_page = page_no
+    needles = _search_needles(q, question)
+    for pno in range(page_no, last_page + 1):
+        pg = doc[pno - 1]
+        for needle in needles:
             if hit_count >= 8:
                 break
             rects = pg.search_for(needle)
             if not rects:
                 continue
             for rect in rects[:3]:
+                if hit_count >= 8:
+                    break
                 annot = pg.add_highlight_annot(rect)
                 annot.set_colors(stroke=(1, 1, 0))  # 黄色
                 annot.update()
                 hit_count += 1
+            if hit_count:
+                hit_page = pno
+        if hit_count:
+            break
 
-        doc.save(str(cached), deflate=True, garbage=3)
+    if hit_count == 0:
+        # 没匹配上：不写缓存，直接返回原文件（只跳页），下次请求还能重新尝试
         doc.close()
-        print(f"[highlight] {safe} p.{page_no} 命中 {hit_count} 处", flush=True)
+        print(f"[highlight] {safe} p.{page_no} 未命中，返回原文件（不缓存）", flush=True)
+        return FileResponse(str(target), media_type="application/pdf", filename=safe,
+                            content_disposition_type="inline")
 
+    doc.save(str(cached), deflate=True, garbage=3)
+    doc.close()
+    print(f"[highlight] {safe} p.{hit_page} 命中 {hit_count} 处（缓存 {key}）", flush=True)
     return FileResponse(str(cached), media_type="application/pdf", filename=safe,
                         content_disposition_type="inline")
 

@@ -19,7 +19,7 @@ export function getProviders() {
  * @param {string} name 文件名
  * @param {number} [page] 页码（1 起）
  */
-export function fileUrl(name, page, snippet, question) {
+export function fileUrl(name, page, snippet, question, pageEnd) {
   const encoded = encodeURIComponent(name)
   if (/\.docx$/i.test(name)) {
     // DOCX 浏览器渲染不了，走后端转好的 HTML 页面（不会弹下载）
@@ -29,7 +29,8 @@ export function fileUrl(name, page, snippet, question) {
     // PDF：后端在命中位置打黄色高亮，再把整份 PDF 内嵌打开并跳到该页
     const q = encodeURIComponent(snippet)
     const ask = question ? `&question=${encodeURIComponent(question)}` : ''
-    return `/api/files/${encoded}/highlight?page=${page || 1}&q=${q}${ask}#page=${page || 1}`
+    const end = pageEnd && pageEnd > (page || 1) ? `&page_end=${pageEnd}` : ''
+    return `/api/files/${encoded}/highlight?page=${page || 1}${end}&q=${q}${ask}#page=${page || 1}`
   }
   // PDF / MD / TXT 直接内嵌打开；PDF 用 #page=N 跳页
   const base = `/api/files/${encoded}/raw`
