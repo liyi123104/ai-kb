@@ -27,8 +27,10 @@ PROMPT_TEMPLATE = r"""你是一个严谨的知识库问答助手。请只依据�
 规则：
 1. 只使用参考资料中的信息，不要编造，不要引入资料之外的知识。
 2. 第一行直接给出答案（一句话），不要写"根据资料"之类的铺垫。
-3. 只要资料里有能支撑答案的事实，就直接回答（哪怕只覆盖问题的一部分），并说明依据。
-4. 只有当资料完全没有回答该问题的事实（只是出现了相同词汇不算）时，才回答「资料中没有相关内容。」，
+3. 先判断资料里有没有**直接回答这个问题**的事实：
+   有就直接回答（可以只答资料能支持的部分）；没有就第一行输出「资料中没有相关内容。」。
+4. 「资料里出现了相同词汇」不等于「资料回答了这个问题」。
+   例如资料讲的是"天气对农业的影响"，而问题是"今天北京天气怎么样"，必须拒答。
    不要用只言片语拼凑答案，也不要先否定再答。
 5. 用与问题相同的语言回答（英文问题用英文答，中文问题用中文答）。
 6. 回答里用 [编号] 标注依据，例如「自注意力能并行计算 [2]」。
@@ -315,21 +317,30 @@ def best_snippet(text: str, question: str = "", limit: int = 120) -> str:
         return ""
 
     ends = "。！？；.!?;"
-    sentences = [s.strip() for s in re.split(r"(?<=[。！？；.!?;])\s*", flat) if s.strip()]
-    # 优先用「以标点收尾」的完整句；只有整段都没标点时才退回原样
-    complete = [s for s in sentences if s[-1] in ends and len(s) >= 12]
-    pool = complete or [s for s in sentences if len(s) >= 12] or sentences or [flat]
-    if not pool:
-        return flat[:limit]
 
-    # 代码行不适合当摘录（如 "num_hiddens, num_heads = 100, 5 ..."）：
-    # 中文句要求 CJK 占比够高；英文句不允许出现代码特征。
     def is_prose(s: str) -> bool:
         cjk = len(re.findall(r"[\u4e00-\u9fff]", s))
         if cjk / max(len(s), 1) >= 0.25:
             return True
         return not re.search(r"[=(){}\[\];_<>]|\b(import|def|class|return|print)\b", s)
 
+    # 先按原始换行切块：PDF 里代码行与正文是靠换行分隔的，
+    # 一旦把换行抹成空格，代码就会和正文粘成"一句"，后面无法过滤。
+    blocks = [re.sub(r"\s+", " ", b).strip() for b in (text or "").splitlines()]
+    sentences = []
+    for block in blocks:
+        if not block:
+            continue
+        for part in re.split(r"(?<=[。！？；.!?;])\s*", block):
+            if part.strip():
+                sentences.append(part.strip())
+    # 优先用「以标点收尾」的完整句；只有整段都没标点时才退回原样
+    complete = [s for s in sentences if s[-1] in ends and len(s) >= 12]
+    pool = complete or [s for s in sentences if len(s) >= 12] or sentences or [flat]
+    if not pool:
+        return flat[:limit]
+
+    # 代码行不适合当摘录（如 "num_hiddens, num_heads = 100, 5 ..."）
     prose = [s for s in pool if is_prose(s)]
     if prose:
         pool = prose

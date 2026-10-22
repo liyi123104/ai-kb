@@ -220,6 +220,23 @@ data/           chroma/ 向量库 · app.db 历史 · uploads/ 上传文件 · t
 docs/           计划书、基线、环境记录
 ```
 
+## 自动化测试
+
+```powershell
+.venv\Scripts\python.exe tests\run_tests.py
+```
+
+30 个用例，分四组（脚本自己拉起后端，跑完自动关闭）：
+
+| 组 | 内容 |
+|---|---|
+| A 接口契约（10） | health / providers / files / upload / delete 的返回结构与错误码 |
+| B 安全与边界（6） | 路径穿越、未知文件、空问题、超长问题、docx 阅读视图、PDF 高亮 |
+| C 问答与流式（6） | 答案与出处、无关问题拒答、会话落库、SSE 事件顺序、指定模型 |
+| D 纯函数与数据（8） | clean_answer、best_snippet、page_label、测试集与评测结果一致性 |
+
+当前结果：**30/30 通过**（约 70 秒）。
+
 ## 评测
 
 ```powershell
