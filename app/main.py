@@ -227,7 +227,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
             _t0 = _t.perf_counter()
             hits = rag.retrieve(req.question)
             print(f"[chat] retrieve {_t.perf_counter() - _t0:.2f}s, hits={len(hits)}", flush=True)
-            sources = rag.make_sources(hits)
+            sources = rag.make_sources(hits, req.question)
             yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
 
             best_score = max((1 - float(d) for _, d in hits), default=0.0)

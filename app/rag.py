@@ -303,10 +303,70 @@ def format_context(hits: list[tuple]) -> str:
     return "\n\n".join(blocks)
 
 
-def make_sources(hits: list[tuple]) -> list[dict]:
+def best_snippet(text: str, question: str = "", limit: int = 120) -> str:
+    """从片段里挑出「与问题最相关的一句话」作为出处摘要。
+
+    直接截前 100 字会从单词/句子中间断开（例如 "e larger field called..."），
+    读起来毫无信息量。这里按句子切分、按与问题的字面重叠打分，取最相关的一句；
+    太短的残句会和下一句合并，超长时在词边界截断并加省略号。
+    """
+    flat = re.sub(r"\s+", " ", text or "").strip()
+    if not flat:
+        return ""
+
+    ends = "。！？；.!?;"
+    sentences = [s.strip() for s in re.split(r"(?<=[。！？；.!?;])\s*", flat) if s.strip()]
+    # 优先用「以标点收尾」的完整句；只有整段都没标点时才退回原样
+    complete = [s for s in sentences if s[-1] in ends and len(s) >= 12]
+    pool = complete or [s for s in sentences if len(s) >= 12] or sentences or [flat]
+    if not pool:
+        return flat[:limit]
+
+    # 代码行不适合当摘录（如 "num_hiddens, num_heads = 100, 5 ..."）：
+    # 中文句要求 CJK 占比够高；英文句不允许出现代码特征。
+    def is_prose(s: str) -> bool:
+        cjk = len(re.findall(r"[\u4e00-\u9fff]", s))
+        if cjk / max(len(s), 1) >= 0.25:
+            return True
+        return not re.search(r"[=(){}\[\];_<>]|\b(import|def|class|return|print)\b", s)
+
+    prose = [s for s in pool if is_prose(s)]
+    if prose:
+        pool = prose
+
+    if question:
+        q_chars = {question[i:i + 2] for i in range(len(question) - 1)}
+        def score(s: str) -> float:
+            s_chars = {s[i:i + 2] for i in range(len(s) - 1)}
+            overlap = len(q_chars & s_chars) / (len(s_chars) or 1)
+            # 残句往往密度高但信息少，按长度打个折，避免只选到半句
+            return overlap * min(len(s), 60) / 60
+        best = max(pool, key=score)
+    else:
+        best = pool[0]
+
+    # 太短（半个句子）就把后面的内容接上，保证可读
+    if len(best) < 30:
+        idx = flat.find(best)
+        if idx >= 0:
+            tail = flat[idx + len(best): idx + len(best) + limit]
+            best = (best + tail).strip()
+
+    if len(best) <= limit:
+        return best
+
+    cut = best[:limit]
+    # 英文尽量不切断单词：回退到最后一个空格
+    if " " in cut and not re.search(r"[\u4e00-\u9fff]", cut[-12:]):
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip("，,、 ") + "…"
+
+
+def make_sources(hits: list[tuple], question: str = "") -> list[dict]:
     out = []
     for i, (doc, distance) in enumerate(hits, start=1):
         md = doc.metadata
+        raw = re.sub(r"\s+", " ", doc.page_content.strip())
         out.append({
             "index": i,
             "file": md["source"],
@@ -315,9 +375,9 @@ def make_sources(hits: list[tuple]) -> list[dict]:
             "page_end": md["page_end"],
             "page_label": page_label(md),
             "score": round(1 - float(distance), 4),
-            "snippet": re.sub(r"\s+", " ", doc.page_content.strip())[:100],
+            "snippet": best_snippet(raw, question),
             # 完整片段（截断 600 字）：前端点开原文时用它逐句定位高亮
-            "text": re.sub(r"\s+", " ", doc.page_content.strip())[:600],
+            "text": raw[:600],
         })
     return out
 
@@ -346,7 +406,7 @@ def answer(question: str, k: int | None = None, answer_top_n: int | None = None,
 
     best_score = max(1 - float(d) for _, d in hits)
     if best_score < settings.score_gate:
-        return {"question": question, "answer": NO_ANSWER, "sources": make_sources(hits[:1]),
+        return {"question": question, "answer": NO_ANSWER, "sources": make_sources(hits[:1], question),
                 "best_score": round(best_score, 4), "gate": settings.score_gate,
                 "gated": True, "error": None}
 
@@ -354,7 +414,7 @@ def answer(question: str, k: int | None = None, answer_top_n: int | None = None,
     prompt = PROMPT_TEMPLATE.format(context=format_context(context_hits), question=question)
     resp = get_llm(provider=provider, model=model).invoke(prompt)
     text = resp.content if isinstance(resp.content, str) else str(resp.content)
-    return {"question": question, "answer": clean_answer(text), "sources": make_sources(hits),
+    return {"question": question, "answer": clean_answer(text), "sources": make_sources(hits, question),
             "best_score": round(best_score, 4), "gate": settings.score_gate,
             "gated": False, "error": None}
 
