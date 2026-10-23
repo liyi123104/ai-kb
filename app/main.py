@@ -41,7 +41,14 @@ from app.config import settings, setup_logging
 
 setup_logging()
 
-app = FastAPI(title="AI 学习资料知识库", version="0.1.0")
+_docs_on = settings.docs_enabled
+app = FastAPI(
+    title="AI 学习资料知识库",
+    version="0.1.0",
+    docs_url="/docs" if _docs_on else None,
+    redoc_url="/redoc" if _docs_on else None,
+    openapi_url="/openapi.json" if _docs_on else None,
+)
 
 # 建表放在模块导入时执行（幂等）：这样无论是 uvicorn 启动、`python -m app.main`，
 # 还是测试里用 TestClient(app) 直接导入，数据库结构都已经就绪。
@@ -65,6 +72,45 @@ def _session_value() -> str:
 
 class LoginRequest(BaseModel):
     token: str = Field(..., description="AUTH_TOKEN 的值")
+
+
+# 简单限流：每 IP 每分钟滑动窗口，够单机用；多实例部署应换成 Redis 计数
+_RATE_BUCKETS: dict[str, list[float]] = {}
+_RATE_LOCK = threading.Lock()
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_rate(ip: str, limit: int, bucket: str) -> bool:
+    if limit <= 0:
+        return True
+    now = time.time()
+    key = f"{bucket}:{ip}"
+    with _RATE_LOCK:
+        stamps = _RATE_BUCKETS.setdefault(key, [])
+        stamps[:] = [t for t in stamps if now - t < 60]
+        if len(stamps) >= limit:
+            return False
+        stamps.append(now)
+    return True
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    """按 IP 限流：上传比普通请求更严，超限返回 429 并带 Retry-After。"""
+    ip = _client_ip(request)
+    is_upload = request.url.path.endswith("/upload")
+    limit = settings.rate_limit_upload_per_minute if is_upload else settings.rate_limit_per_minute
+    if not _check_rate(ip, limit, "upload" if is_upload else "general"):
+        return JSONResponse(status_code=429,
+                            content={"detail": f"请求过于频繁，请稍后再试（每分钟上限 {limit} 次）"},
+                            headers={"Retry-After": "60"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -460,6 +506,7 @@ def login(req: LoginRequest, response: Response) -> dict:
     response.set_cookie(
         key=SESSION_COOKIE, value=_session_value(),
         max_age=7 * 24 * 3600, httponly=True, samesite="lax", path="/",
+        secure=settings.cookie_secure,
     )
     return {"ok": True, "auth_required": True, "expires_in": 7 * 24 * 3600}
 

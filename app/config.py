@@ -99,6 +99,13 @@ class Settings:
     # 列表式重排：用生成模型对 Top-K 候选排一次序（一次调用，约 1 秒）
     # Ollama 0.13 没有 /api/rerank，所以走提示词排序；关掉则保持纯向量顺序
     rerank_enabled: bool = _get_bool("RERANK", False)
+    # 限流：每个客户端 IP 每分钟允许的请求数（0 = 关闭）。上传单独更严的阈值。
+    rate_limit_per_minute: int = _get_int("RATE_LIMIT_PER_MINUTE", 120)
+    rate_limit_upload_per_minute: int = _get_int("RATE_LIMIT_UPLOAD_PER_MINUTE", 30)
+    # 生产环境建议关闭 /docs、/redoc、/openapi.json
+    docs_enabled: bool = _get_bool("DOCS_ENABLED", True)
+    # 走 HTTPS 时设为 1，会话 Cookie 会加 Secure 标记
+    cookie_secure: bool = _get_bool("COOKIE_SECURE", False)
 
     # ---- 服务 ----
     host: str = _get("APP_HOST", "0.0.0.0")

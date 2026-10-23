@@ -55,3 +55,6 @@ docs/*_v1.0_backup.docx
 
 # 打包产物（scripts/package.py 生成）
 dist/
+
+# 数据备份（scripts/backup_data.py 生成，体积大）
+backups/

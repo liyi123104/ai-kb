@@ -3,6 +3,24 @@
 计划书 T6.2 要求「公网能打开界面 → 能完成上传与提问 → 地址写入 README 与简历」。
 下面两条路线都写好了完整命令，选定后照做即可；两条都不改技术栈。
 
+## 公网加固清单（部署前逐项过）
+
+| 项 | 做法 | 本项目状态 |
+|---|---|---|
+| 鉴权 | `.env` 设 `AUTH_TOKEN`，界面登录一次 | ✅ 已实现（登录 + 7 天会话 Cookie） |
+| 限流 | `.env` 的 `RATE_LIMIT_PER_MINUTE`（默认 120/分钟）与 `RATE_LIMIT_UPLOAD_PER_MINUTE`（默认 30） | ✅ 已实现（应用层按 IP 滑动窗口，超限 429） |
+| 更外层限流 | `deploy/nginx-public.conf` 里的 `limit_req` | ✅ 样例已备 |
+| HTTPS | `deploy/nginx-public.conf` + `certbot --nginx -d 你的域名` | ✅ 配置样例已备（需域名） |
+| Cookie 安全标记 | HTTPS 下设 `COOKIE_SECURE=1` | ✅ 已实现 |
+| 关闭接口文档 | 生产设 `DOCS_ENABLED=0`（/docs 与 /openapi.json 变 404） | ✅ 已实现 |
+| 上传体积 | 应用内 100MB 上限 + Nginx `client_max_body_size 100m` | ✅ 两处都有 |
+| 数据备份 | `scripts/backup_data.py`（向量库 + SQLite + 上传文件打 zip） | ✅ 已实现，实测 701MB |
+| 日志 | `data/app.log`，5MB×3 轮转 | ✅ 已实现 |
+| 容器重启策略 | compose 里 `restart: unless-stopped` + healthcheck | ✅ 已配 |
+
+**部署顺序建议**：先按上表配好 `.env`（AUTH_TOKEN / DOCS_ENABLED=0 / COOKIE_SECURE=1）→ 起容器 →
+套上 Nginx 样例并申请证书 → 最后把地址写进 README 与简历。
+
 ## 先决条件（两条路线共用）
 
 > **公网部署必须做的一步**：在 `.env` 里设置 `AUTH_TOKEN=<任意随机串>`。

@@ -53,8 +53,11 @@
 | 路径穿越 | ✅ 所有文件接口先取 `Path(name).name` |
 | 上传限制 | ✅ 类型白名单 + 100MB 上限 + 空文件同步拒绝 |
 | 语料只读 | ✅ 容器内 `materials` 以 `:ro` 挂载 |
-| 限流 | ❌ **未做**（公网部署前建议补） |
-| HTTPS | ❌ 未做（可由 Nginx + certbot 解决） |
+| 限流 | ✅ 应用层按 IP 双击窗口（普通 120/分钟、上传 30/分钟，超限 429）+ Nginx 样例 |
+| 关闭接口文档 | ✅ `DOCS_ENABLED=0` 时 /docs 与 /openapi.json 返回 404 |
+| Cookie 安全标记 | ✅ HTTPS 下设 `COOKIE_SECURE=1` |
+| HTTPS | ✅ `deploy/nginx-public.conf` + certbot（需域名） |
+| 数据备份 | ✅ `scripts/backup_data.py`，实测 701MB / 67 文件 |
 
 ## 五、交付物清单
 
@@ -83,11 +86,18 @@
 5. **文档目录为 15 篇**，其中技术点详解 24 节，维护成本不低。
 6. **语料含 23,453 片通用参考**（PostgreSQL 手册等），默认库只用 AI 那 10,942 片；切库需改环境变量。
 
-## 七、公网部署前必须做的三件事
+## 七、公网部署前的加固（已完成）
 
-1. `.env` 设 `AUTH_TOKEN`（已设，换机器记得重设）；
-2. 加**限流**（如 Nginx `limit_req` 或应用层令牌桶），防止被刷上传；
-3. 上 **HTTPS**（Nginx + certbot），否则令牌是明文传输。
+代码侧全部补齐：
+
+1. **鉴权**：登录一次 + 7 天会话 Cookie（已完成）
+2. **限流**：应用层按 IP 滑动窗口，普通 120/分钟、上传 30/分钟，超限返回 429（已完成）
+3. **关闭接口文档**：`DOCS_ENABLED=0` 时 /docs、/redoc、/openapi.json 返回 404（已完成）
+4. **Cookie 安全标记**：`COOKIE_SECURE=1` 时会话 Cookie 带 Secure（已完成）
+5. **数据备份**：`scripts/backup_data.py`（向量库 + SQLite + 上传文件，701MB/67 文件实测）
+6. **Nginx 样例**：`deploy/nginx-public.conf`（HTTPS + 证书占位 + 普通/上传两档限流 + SSE 不缓冲）
+
+剩下只有「买域名/服务器」与「执行 certbot」由你操作，配置已给全。
 
 ## 八、环境状态（检查时）
 
