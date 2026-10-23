@@ -20,7 +20,9 @@
 from __future__ import annotations
 
 import json
+import threading
 import urllib.request
+import uuid
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
@@ -83,6 +85,10 @@ def warm_up_models() -> None:
         keep_chat = _s.llm_provider.lower() == "ollama"
         while True:
             try:
+                # 入库期间不要保活：那会把 bge-m3 挤出 GPU，入库速率从 45 片/秒掉到 4.7
+                if rag.is_ingesting():
+                    time.sleep(10)
+                    continue
                 embedder.embed_query("保活")
                 # 只有本地生成时才需要保活聊天模型；云端生成时保活它会白占 4.4GB 显存，
                 # 把向量模型挤出 GPU（实测导致每次检索多花 2 秒）。
@@ -163,6 +169,40 @@ def providers() -> dict:
     return {"default": selected, "items": items}
 
 
+# 后台上传任务：上传接口立刻返回 job_id，前端轮询进度，避免大文件把界面卡住
+_UPLOAD_JOBS: dict[str, dict] = {}
+_UPLOAD_JOBS_LOCK = threading.Lock()
+
+
+def _run_ingest_job(job_id: str, target: Path, name: str) -> None:
+    """后台线程里跑入库，按批更新进度。"""
+    def on_progress(done: int, total: int) -> None:
+        with _UPLOAD_JOBS_LOCK:
+            job = _UPLOAD_JOBS.get(job_id)
+            if job is not None:
+                job.update(processed=done, total=total)
+
+    try:
+        result = rag.ingest_file(target, progress=on_progress)
+        with _UPLOAD_JOBS_LOCK:
+            _UPLOAD_JOBS[job_id].update(state="done", chunks=result["chunks"],
+                                        seconds=result.get("seconds"),
+                                        chunks_per_sec=result.get("chunks_per_sec"))
+    except Exception as exc:  # noqa: BLE001 - 失败信息要回给前端
+        with _UPLOAD_JOBS_LOCK:
+            _UPLOAD_JOBS[job_id].update(state="error", error=str(exc))
+
+
+@app.get("/upload/progress/{job_id}")
+def upload_progress(job_id: str) -> dict:
+    """查询后台上传任务的进度。"""
+    with _UPLOAD_JOBS_LOCK:
+        job = _UPLOAD_JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="没有这个上传任务")
+        return dict(job)
+
+
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)) -> dict:
     """接收文件 → 解析切片嵌入入库 → 返回文件名与切片数。"""
@@ -188,15 +228,25 @@ async def upload(file: UploadFile = File(...)) -> dict:
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"保存文件失败：{exc}") from exc
 
+    # 空文件 / 无文字层的扫描件在启动后台任务前就拒掉，否则用户要等到后台跑完才知道失败
     try:
-        result = rag.ingest_file(target)
+        pages = rag.extract_pages(target)
+        has_text = any(p.get("text", "").strip() for p in pages)
     except ValueError as exc:
+        target.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"入库失败：{exc}") from exc
+    if not has_text:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"文件没有可提取的文本：{filename}")
 
-    return {"filename": result["filename"], "chunks": result["chunks"], "size": result["size"],
-            "seconds": result.get("seconds"), "chunks_per_sec": result.get("chunks_per_sec")}
+    job_id = uuid.uuid4().hex[:12]
+    with _UPLOAD_JOBS_LOCK:
+        _UPLOAD_JOBS[job_id] = {"job_id": job_id, "filename": filename, "size": size,
+                                "state": "running", "processed": 0, "total": 0,
+                                "chunks": 0, "seconds": None, "chunks_per_sec": None,
+                                "error": None}
+    threading.Thread(target=_run_ingest_job, args=(job_id, target, filename), daemon=True).start()
+    return {"job_id": job_id, "filename": filename, "size": size, "state": "running"}
 
 
 @app.post("/chat")

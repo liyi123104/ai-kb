@@ -37,6 +37,7 @@
         :stroke-width="10"
         class="progress"
       />
+      <div v-if="uploading && ingestLabel" class="ingest-label">{{ ingestLabel }}</div>
 
       <div class="list-head">
         <span>已入库文件（{{ files.length }}）</span>
@@ -127,7 +128,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { deleteFile, fileUrl, getFiles, getProviders, streamChat, uploadFile } from '../api'
+import { deleteFile, fileUrl, getFiles, getProviders, getUploadProgress, streamChat, uploadFile } from '../api'
 
 const files = ref([])
 const messages = ref([])
@@ -137,6 +138,7 @@ const streaming = ref(false)
 const currentAnswer = ref('')
 const uploading = ref(false)
 const uploadPercent = ref(0)
+const ingestLabel = ref('')
 const scrollRef = ref(null)
 const providers = ref([])
 // provider 下拉框里存的是 "provider:model" 形式的 id（如 ollama:qwen2.5:7b）
@@ -197,9 +199,32 @@ async function handleFileChange(uploadFileObj) {
   uploading.value = true
   uploadPercent.value = 0
   try {
+    // 上传只负责把文件传上去，入库在后台跑；随后轮询进度，界面不会一直卡住
     const { data } = await uploadFile(raw, (p) => (uploadPercent.value = p))
-    const sec = data.seconds ? `，用时 ${data.seconds}s` : ''
-    ElMessage.success(`${data.filename} 入库 ${data.chunks} 片${sec}`)
+    const jobId = data.job_id
+    if (!jobId) {
+      // 旧后端：同步返回结果
+      ElMessage.success(`${data.filename} 入库 ${data.chunks} 片`)
+      await loadFiles()
+      return
+    }
+    ingestLabel.value = `${data.filename} 入库中…`
+    const started = Date.now()
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 600))
+      const { data: job } = await getUploadProgress(jobId)
+      if (job.state === 'running') {
+        uploadPercent.value = job.total
+          ? Math.min(99, Math.round((job.processed / job.total) * 100))
+          : 1
+        if (job.total) ingestLabel.value = `${job.filename} 入库中… ${job.processed}/${job.total} 片`
+        continue
+      }
+      if (job.state === 'error') throw new Error(job.error || '入库失败')
+      const sec = ((Date.now() - started) / 1000).toFixed(1)
+      ElMessage.success(`${job.filename} 入库 ${job.chunks} 片，用时 ${sec}s`)
+      break
+    }
     await loadFiles()
   } catch (err) {
     const detail = err?.response?.data?.detail || err.message
@@ -207,6 +232,7 @@ async function handleFileChange(uploadFileObj) {
   } finally {
     uploading.value = false
     uploadPercent.value = 0
+    ingestLabel.value = ''
   }
 }
 
@@ -317,6 +343,11 @@ onMounted(() => {
 .upload-tip .sub {
   color: #909399;
   font-size: 12px;
+}
+.ingest-label {
+  font-size: 12px;
+  color: #909399;
+  margin: 4px 0 8px;
 }
 .progress {
   margin: 8px 0;

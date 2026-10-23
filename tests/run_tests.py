@@ -53,6 +53,19 @@ def http(method: str, path: str, body=None, timeout: int = 300):
             return exc.code, dict(exc.headers or {}), raw
 
 
+def wait_upload(job_id: str, timeout: int = 900) -> dict:
+    """上传已改为后台任务：轮询到完成。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        st, _, job = http("GET", f"/upload/progress/{job_id}", timeout=30)
+        if st != 200:
+            return {"state": "error", "error": f"进度接口 {st}"}
+        if job.get("state") in ("done", "error"):
+            return job
+        time.sleep(0.5)
+    return {"state": "error", "error": "等待入库超时"}
+
+
 def upload(filename: str, content: bytes) -> tuple[int, dict]:
     boundary = "----test" + uuid_hex()
     body = (
@@ -66,12 +79,20 @@ def upload(filename: str, content: bytes) -> tuple[int, dict]:
     )
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
-            return resp.status, json.loads(resp.read())
+            status, data = resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         try:
             return exc.code, json.loads(exc.read())
         except Exception:  # noqa: BLE001
             return exc.code, {}
+
+    # 2026-10-23 起上传是后台任务：等它入库完成再返回，用例断言不受影响
+    if data.get("job_id"):
+        job = wait_upload(data["job_id"])
+        if job.get("state") == "error":
+            return 500, {"detail": job.get("error")}
+        data = {**data, "chunks": job.get("chunks", 0), "state": job.get("state")}
+    return status, data
 
 
 def uuid_hex() -> str:

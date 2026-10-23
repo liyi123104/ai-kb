@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 import urllib.request
 from datetime import datetime
@@ -24,6 +25,14 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
 NO_ANSWER = "资料中没有相关内容。"
+
+# 入库期间为 True：保活线程看到后不再把聊天模型拉回显存，
+# 否则它会把正在做嵌入的 bge-m3 挤出 GPU，后面的批次退回 CPU（实测 45 片/秒掉到 4.7）。
+_INGESTING = threading.Event()
+
+
+def is_ingesting() -> bool:
+    return _INGESTING.is_set()
 
 PROMPT_TEMPLATE = r"""你是一个严谨的知识库问答助手。请只依据【参考资料】回答【问题】。
 
@@ -300,7 +309,8 @@ def _ingest_embedder():
     ), True
 
 
-def ingest_file(path: Path, source_name: str | None = None, batch: int = 64) -> dict:
+def ingest_file(path: Path, source_name: str | None = None, batch: int = 64,
+                progress=None) -> dict:
     """解析 → 切片 → 嵌入 → 入库。返回 {"filename", "chunks", "size"}（对应 /upload 的返回）。"""
     name = source_name or path.name
     chunks = build_chunks(path, name)
@@ -325,19 +335,25 @@ def ingest_file(path: Path, source_name: str | None = None, batch: int = 64) -> 
     embedder, used_gpu = _ingest_embedder()
     batch = max(batch, 64)  # GPU 下批越大越划算（实测 64 片/批约 42 片/秒）
     started = time.perf_counter()
-    for i in range(0, len(chunks), batch):
-        part = chunks[i:i + batch]
-        texts = [c["text"] for c in part]
-        # 自己算向量再写库：绕开 LangChain 固定的 embedding_function，
-        # 才能临时换用 GPU 嵌入器
-        vectors = embedder.embed_documents(texts)
-        vs._collection.add(  # noqa: SLF001
-            ids=[_chunk_id(c, i + j) for j, c in enumerate(part)],
-            documents=texts,
-            metadatas=[{k: c[k] for k in ("source", "page", "page_start", "page_end", "chars")}
-                       for c in part],
-            embeddings=vectors,
-        )
+    _INGESTING.set()  # 通知保活线程：入库期间别把聊天模型拉回显存，否则会挤掉 bge-m3
+    try:
+        for i in range(0, len(chunks), batch):
+            part = chunks[i:i + batch]
+            texts = [c["text"] for c in part]
+            # 自己算向量再写库：绕开 LangChain 固定的 embedding_function，
+            # 才能临时换用 GPU 嵌入器
+            vectors = embedder.embed_documents(texts)
+            vs._collection.add(  # noqa: SLF001
+                ids=[_chunk_id(c, i + j) for j, c in enumerate(part)],
+                documents=texts,
+                metadatas=[{k: c[k] for k in ("source", "page", "page_start", "page_end", "chars")}
+                           for c in part],
+                embeddings=vectors,
+            )
+            if progress is not None:
+                progress(min(i + batch, len(chunks)), len(chunks))
+    finally:
+        _INGESTING.clear()
 
     elapsed = time.perf_counter() - started
     rate = len(chunks) / elapsed if elapsed else 0

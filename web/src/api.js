@@ -37,6 +37,10 @@ export function fileUrl(name, page, snippet, question, pageEnd) {
   return page ? `${base}#page=${page}` : base
 }
 
+export function getUploadProgress(jobId) {
+  return http.get(`/upload/progress/${jobId}`)
+}
+
 export function getFiles() {
   return http.get('/files')
 }

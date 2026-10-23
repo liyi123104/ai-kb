@@ -257,8 +257,18 @@ docs/           计划书、基线、环境记录
 2. **PDF 改用 PyMuPDF 解析**：字数与 pypdf 差 0.7%，召回率同为 90.0%（`PDF_EXTRACTOR=fitz`，
    出问题自动退回 pypdf）。
 
-注意：如果机器上还有别的程序在调 Ollama，显存会被抢占，入库会退回 CPU 速率。
-实测过一次 148 片跑了 48 秒，就是被另一个项目占着模型所致。
+**上传是异步的，界面有实时进度**：POST /upload 只负责把文件收下并返回 job_id，
+入库在后台线程里跑；前端每 600ms 查 /upload/progress/{job_id}，显示
+「已处理 640/1773 片」。空文件与无文字层的扫描件会在启动后台任务前同步返回 400。
+
+接口：
+- `POST /upload` → `{job_id, filename, size, state}`
+- `GET /upload/progress/{job_id}` → `{state, processed, total, chunks, seconds, chunks_per_sec}`
+
+**为什么有时仍然慢**：入库需要把 bge-m3 独占在 GPU 上。如果同一台机器上还有别的程序在调
+Ollama（比如另开一个项目），它的模型会把 bge-m3 挤出显存，速率会从 45 片/秒掉到 2–20 片/秒。
+实测遇到两次：一次是另一个项目占着 8000 端口并持续问模型，一次是同时在下轮子。
+处理办法：入库时先关掉其他占用 Ollama 的程序；界面上的进度条能直接看出当前速率。
 
 ## 评测
 
