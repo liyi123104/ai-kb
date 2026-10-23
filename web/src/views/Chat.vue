@@ -198,7 +198,8 @@ async function handleFileChange(uploadFileObj) {
   uploadPercent.value = 0
   try {
     const { data } = await uploadFile(raw, (p) => (uploadPercent.value = p))
-    ElMessage.success(`${data.filename} 入库 ${data.chunks} 片`)
+    const sec = data.seconds ? `，用时 ${data.seconds}s` : ''
+    ElMessage.success(`${data.filename} 入库 ${data.chunks} 片${sec}`)
     await loadFiles()
   } catch (err) {
     const detail = err?.response?.data?.detail || err.message

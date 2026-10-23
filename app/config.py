@@ -29,6 +29,13 @@ def _get(name: str, default: str) -> str:
     return default if value is None or value.strip() == "" else value.strip()
 
 
+def _get_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def _get_int(name: str, default: int) -> int:
     try:
         return int(_get(name, str(default)))
@@ -81,6 +88,11 @@ class Settings:
     chroma_dir: Path = ROOT / "data" / "chroma"
     db_path: Path = ROOT / "data" / "app.db"
     collection: str = _get("CHROMA_COLLECTION", "ai-kb")
+    # 入库时把向量模型放 GPU：入库不生成，让出显存能快约 12 倍
+    # （实测 CPU 1.4–3.3 片/秒，GPU 25–42 片/秒）。显存不足时设为 0 退回 CPU。
+    ingest_use_gpu: bool = _get_bool("INGEST_USE_GPU", True)
+    # PDF 文本提取器：fitz（PyMuPDF，快约 30 倍）或 pypdf（老逻辑，兜底）
+    pdf_extractor: str = _get("PDF_EXTRACTOR", "fitz")
 
     # ---- 服务 ----
     host: str = _get("APP_HOST", "0.0.0.0")

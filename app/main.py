@@ -195,7 +195,8 @@ async def upload(file: UploadFile = File(...)) -> dict:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"入库失败：{exc}") from exc
 
-    return {"filename": result["filename"], "chunks": result["chunks"], "size": result["size"]}
+    return {"filename": result["filename"], "chunks": result["chunks"], "size": result["size"],
+            "seconds": result.get("seconds"), "chunks_per_sec": result.get("chunks_per_sec")}
 
 
 @app.post("/chat")

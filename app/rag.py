@@ -8,8 +8,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
+import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -77,6 +80,31 @@ def extract_pages(path: Path) -> list[dict]:
 
 
 def _extract_pdf(path: Path) -> list[dict]:
+    """PDF 逐页提取。默认用 PyMuPDF（比 pypdf 快约 30 倍），失败时退回 pypdf。"""
+    if settings.pdf_extractor.lower() == "fitz":
+        try:
+            return _extract_pdf_fitz(path)
+        except Exception as exc:  # noqa: BLE001 - 解析器异常不致命，退回 pypdf
+            logging.getLogger(__name__).warning("PyMuPDF 解析失败，改用 pypdf：%s", exc)
+    return _extract_pdf_pypdf(path)
+
+
+def _extract_pdf_fitz(path: Path) -> list[dict]:
+    """PyMuPDF 提取：813 页约 1.4 秒（pypdf 要 42 秒），字数差异 0.7%。"""
+    import pymupdf
+
+    doc = pymupdf.open(str(path))
+    if doc.needs_pass and not doc.authenticate(""):
+        doc.close()
+        raise ValueError(f"PDF 已加密，无法用空密码打开：{path.name}")
+    try:
+        return [{"page": i + 1, "text": doc[i].get_text().replace("\x00", "").strip()}
+                for i in range(doc.page_count)]
+    finally:
+        doc.close()
+
+
+def _extract_pdf_pypdf(path: Path) -> list[dict]:
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
@@ -223,6 +251,55 @@ def _chunk_id(c: dict, seq: int) -> str:
     return f'{c["source"]}:{c["page_start"]}:{seq}:{digest}'
 
 
+def _unload_model(model: str) -> None:
+    """让 Ollama 卸载指定模型，释放显存（失败不影响主流程）。"""
+    payload = {"model": model, "prompt": "", "keep_alive": 0}
+    req = urllib.request.Request(
+        settings.ollama_base_url.rstrip("/") + "/api/generate",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=60).read()
+    except Exception:  # noqa: BLE001 - 卸载失败只是慢一点，不影响入库
+        pass
+
+
+def _unload_embedder(embedder) -> None:
+    payload = {"model": embedder.model, "input": "x", "keep_alive": 0}
+    req = urllib.request.Request(
+        settings.ollama_base_url.rstrip("/") + "/api/embed",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=60).read()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _ingest_embedder():
+    """入库用的嵌入器：默认放 GPU。
+
+    为什么单独一个：平时问答要把显存让给生成模型（embedding 跑 CPU），
+    但入库时根本不生成，此时把 bge-m3 放到 GPU 能快约 12 倍
+    （实测 CPU 1.4–3.3 片/秒，GPU 25–42 片/秒）。
+    入库前先把聊天模型卸载，腾出显存。
+    """
+    from app.llm import OllamaEmbedder, get_embedder
+
+    if not settings.ingest_use_gpu:
+        return get_embedder(), False
+    _unload_model(settings.ollama_model)
+    # 关键：先把已驻留的 CPU 实例卸载，否则 Ollama 会继续复用旧实例，
+    # num_gpu=-1 不会生效（实测吞吐仍是 3.6 片/秒）。卸载后首次请求会按 GPU 重新加载。
+    _unload_embedder(get_embedder())
+    return OllamaEmbedder(
+        model=settings.ollama_embed_model,
+        base_url=settings.ollama_base_url,
+        keep_alive="30m",
+        num_gpu=-1,
+    ), True
+
+
 def ingest_file(path: Path, source_name: str | None = None, batch: int = 64) -> dict:
     """解析 → 切片 → 嵌入 → 入库。返回 {"filename", "chunks", "size"}（对应 /upload 的返回）。"""
     name = source_name or path.name
@@ -245,15 +322,33 @@ def ingest_file(path: Path, source_name: str | None = None, batch: int = 64) -> 
     # 同名文件重复上传：先删掉旧向量，避免同一文件出现两份
     vs._collection.delete(where={"source": name})  # noqa: SLF001
 
+    embedder, used_gpu = _ingest_embedder()
+    batch = max(batch, 64)  # GPU 下批越大越划算（实测 64 片/批约 42 片/秒）
+    started = time.perf_counter()
     for i in range(0, len(chunks), batch):
         part = chunks[i:i + batch]
-        vs.add_texts(
-            [c["text"] for c in part],
+        texts = [c["text"] for c in part]
+        # 自己算向量再写库：绕开 LangChain 固定的 embedding_function，
+        # 才能临时换用 GPU 嵌入器
+        vectors = embedder.embed_documents(texts)
+        vs._collection.add(  # noqa: SLF001
+            ids=[_chunk_id(c, i + j) for j, c in enumerate(part)],
+            documents=texts,
             metadatas=[{k: c[k] for k in ("source", "page", "page_start", "page_end", "chars")}
                        for c in part],
-            ids=[_chunk_id(c, i + j) for j, c in enumerate(part)],
+            embeddings=vectors,
         )
-    return {"filename": name, "chunks": len(chunks), "size": path.stat().st_size}
+
+    elapsed = time.perf_counter() - started
+    rate = len(chunks) / elapsed if elapsed else 0
+    print(f"[ingest] {name}: {len(chunks)} 片，{elapsed:.1f}s（{rate:.1f} 片/秒，"
+          f"{'GPU' if used_gpu else 'CPU'}）", flush=True)
+
+    if used_gpu:
+        _unload_embedder(embedder)  # 用完把显存还给生成模型
+
+    return {"filename": name, "chunks": len(chunks), "size": path.stat().st_size,
+            "seconds": round(elapsed, 1), "chunks_per_sec": round(rate, 1)}
 
 
 def delete_file(name: str) -> int:
