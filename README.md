@@ -276,6 +276,24 @@ Ollama（比如另开一个项目），它的模型会把 bge-m3 挤出显存，
 实测遇到两次：一次是另一个项目占着 8000 端口并持续问模型，一次是同时在下轮子。
 处理办法：入库时先关掉其他占用 Ollama 的程序；界面上的进度条能直接看出当前速率。
 
+## 安全与运维
+
+**访问令牌（可选，公网必备）**：在 `.env` 里设置 `AUTH_TOKEN=your-secret` 后，所有接口要求
+请求头 `X-Auth-Token`；文件类链接可带 `?token=`（浏览器打开时没法带请求头）。
+留空则不鉴权，适合本机自用。前端首次遇到 401 会弹窗让你填令牌并存在浏览器里。
+
+**日志**：写入 `data/app.log`（5MB 轮转、保留 3 份），同时输出到控制台；不再用 print。
+
+**停止生成**：对话进行中发送按钮会变成「停止」，点了立即中断（AbortController）。
+
+**多次采样评测**：30 题里每题值 3.3 个百分点，单次结果噪声很大，建议
+`.venv\Scripts\python.exe scripts\evaluate_repeat.py 3` 跑 3 次看均值与极差。
+
+**按领域分库**：`scripts/split_library.py --dry-run` 先看计划，`--apply` 把向量复制成
+`ai-kb-ai`（只含 AI 资料）与 `ai-kb-ref`（PostgreSQL/Adobe/Docker 等通用参考），原库保留。
+把 `.env` 的 `CHROMA_COLLECTION` 改成 `ai-kb-ai` 即只检索 AI 资料——实测检索从 0.92 秒降到
+0.31 秒，召回与准确率不变。
+
 ## 评测
 
 ```powershell

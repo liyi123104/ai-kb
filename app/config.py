@@ -93,6 +93,9 @@ class Settings:
     ingest_use_gpu: bool = _get_bool("INGEST_USE_GPU", True)
     # PDF 文本提取器：fitz（PyMuPDF，快约 30 倍）或 pypdf（老逻辑，兜底）
     pdf_extractor: str = _get("PDF_EXTRACTOR", "fitz")
+    # 访问令牌：留空表示不启用（本机自用）。填了之后所有接口都要求带 X-Auth-Token，
+    # 文件类 GET 接口也接受 ?token= 参数（浏览器直接打开链接时没法带请求头）。
+    auth_token: str = _get("AUTH_TOKEN", "")
 
     # ---- 服务 ----
     host: str = _get("APP_HOST", "0.0.0.0")
@@ -123,3 +126,29 @@ def _auto_embed_device(s: Settings) -> None:
 
 
 _auto_embed_device(settings)
+
+
+def setup_logging(level: str = "INFO") -> None:
+    """统一日志：控制台 + data/app.log（按 5MB 轮转，保留 3 份）。
+
+    以前用 print 当日志，容器里只能 docker logs 翻，也没有轮转。
+    """
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    root = logging.getLogger()
+    if root.handlers:          # 避免重复添加（uvicorn --reload 或多次 import）
+        return
+    root.setLevel(level)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    log_path = ROOT / "data" / "app.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(log_path, maxBytes=5 * 1024 * 1024,
+                                       backupCount=3, encoding="utf-8")
+    file_handler.setFormatter(fmt)
+    root.addHandler(file_handler)

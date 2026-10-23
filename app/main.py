@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 import urllib.request
@@ -30,12 +31,15 @@ from urllib.parse import quote
 
 from docx import Document
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse, StreamingResponse)
 from pydantic import BaseModel, Field
 
 from app import db, rag
-from app.config import settings
+from app.config import settings, setup_logging
+
+setup_logging()
 
 app = FastAPI(title="AI 学习资料知识库", version="0.1.0")
 
@@ -45,6 +49,35 @@ db.init_db()
 
 ALLOWED_SUFFIXES = rag.SUPPORTED_SUFFIXES
 MAX_UPLOAD_MB = 100
+
+
+# 不需要鉴权的路径：健康检查（容器 healthcheck 要用）与接口文档
+_AUTH_EXEMPT = {"/health", "/docs", "/openapi.json", "/redoc"}
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    """启用了 AUTH_TOKEN 时，所有接口都要求带正确令牌。
+
+    令牌来源：请求头 X-Auth-Token，或查询参数 ?token=（用于浏览器直接打开文件链接）。
+    """
+    token = settings.auth_token
+    if token and request.url.path not in _AUTH_EXEMPT:
+        given = request.headers.get("x-auth-token") or request.query_params.get("token")
+        if given != token:
+            return JSONResponse(status_code=401, content={"detail": "缺少或错误的访问令牌"})
+    return await call_next(request)
+
+
+@app.on_event("startup")
+def _mark_stale_jobs() -> None:
+    """服务启动时把上次没跑完的上传任务标记为中断。"""
+    try:
+        n = db.mark_interrupted_jobs(rag.now_iso())
+        if n:
+            logging.getLogger(__name__).info(f"[startup] {n} 个上传任务被标记为中断")
+    except Exception as exc:  # noqa: BLE001 - 不影响启动
+        logging.getLogger(__name__).info(f"[startup] 标记中断任务失败：{exc}")
 
 
 @app.on_event("startup")
@@ -65,7 +98,7 @@ def warm_up_models() -> None:
         import json as _json
         import urllib.request
 
-        from app.config import settings as _s
+        from app.config import settings, setup_logging as _s
         from app.llm import get_embedder
 
         embedder = get_embedder()
@@ -95,9 +128,9 @@ def warm_up_models() -> None:
                 # 把向量模型挤出 GPU（实测导致每次检索多花 2 秒）。
                 if keep_chat:
                     _keep_chat_alive()
-                print(f"[warmup] 保活完成（chat={'on' if keep_chat else 'off'}）", flush=True)
+                logging.getLogger(__name__).info(f"[warmup] 保活完成（chat={'on' if keep_chat else 'off'}）")
             except Exception as exc:  # noqa: BLE001 - 预热失败不应影响服务
-                print(f"[warmup] 预热跳过：{exc}", flush=True)
+                logging.getLogger(__name__).info(f"[warmup] 预热跳过：{exc}")
             time.sleep(240)  # 4 分钟一次，短于 Ollama 默认 5 分钟卸载阈值
 
     threading.Thread(target=_loop, daemon=True).start()
@@ -171,22 +204,46 @@ def providers() -> dict:
 
 
 # 后台上传任务：上传接口立刻返回 job_id，前端轮询进度，避免大文件把界面卡住
+_INGEST_LOCK = threading.Lock()   # 同一时刻只允许一个入库任务，避免互抢显存
 _UPLOAD_JOBS: dict[str, dict] = {}
 _UPLOAD_JOBS_LOCK = threading.Lock()
 
 
+def _persist_job(job_id: str) -> None:
+    """把任务状态落库（服务重启后仍可查询）。"""
+    with _UPLOAD_JOBS_LOCK:
+        job = _UPLOAD_JOBS.get(job_id)
+        snapshot = dict(job) if job else None
+    if snapshot is not None:
+        db.save_upload_job(snapshot, rag.now_iso())
+
+
 def _run_ingest_job(job_id: str, files: list[dict]) -> None:
-    """后台线程里顺序入库多个文件，按批更新进度。"""
+    """后台线程里顺序入库多个文件，按批更新进度。
+
+    加锁：同一时刻只允许一个入库任务，否则两个任务会互相把对方的向量模型挤出显存。
+    """
+    with _INGEST_LOCK:
+        _run_ingest_job_inner(job_id, files)
+
+
+def _run_ingest_job_inner(job_id: str, files: list[dict]) -> None:
     started = time.perf_counter()
     total_chunks = 0
     for index, item in enumerate(files, start=1):
         name = item["name"]
+        last_persist = 0.0
 
         def on_progress(done: int, total: int, _name=name) -> None:
+            nonlocal last_persist
             with _UPLOAD_JOBS_LOCK:
                 job = _UPLOAD_JOBS.get(job_id)
                 if job is not None:
                     job.update(current=_name, processed=done, total=total)
+            # 每前进 20% 落一次库，兼顾可见性与写放大
+            if total and done / total - last_persist >= 0.2:
+                last_persist = done / total
+                _persist_job(job_id)
 
         with _UPLOAD_JOBS_LOCK:
             _UPLOAD_JOBS[job_id].update(current=name, processed=0, total=0)
@@ -197,6 +254,7 @@ def _run_ingest_job(job_id: str, files: list[dict]) -> None:
             with _UPLOAD_JOBS_LOCK:
                 _UPLOAD_JOBS[job_id].update(state="error", error=f"{name}：{exc}",
                                             done_files=index - 1)
+            _persist_job(job_id)
             return
 
         total_chunks += result["chunks"]
@@ -213,6 +271,7 @@ def _run_ingest_job(job_id: str, files: list[dict]) -> None:
             chunks_per_sec=round(total_chunks / elapsed, 1) if elapsed else 0,
             processed=0, total=0,
         )
+    _persist_job(job_id)
 
 
 @app.get("/upload/progress/{job_id}")
@@ -220,9 +279,12 @@ def upload_progress(job_id: str) -> dict:
     """查询后台上传任务的进度。"""
     with _UPLOAD_JOBS_LOCK:
         job = _UPLOAD_JOBS.get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="没有这个上传任务")
-        return dict(job)
+        if job is not None:
+            return dict(job)
+    stored = db.get_upload_job(job_id)   # 服务重启后仍能查到历史任务
+    if stored is None:
+        raise HTTPException(status_code=404, detail="没有这个上传任务")
+    return stored
 
 
 @app.post("/upload")
@@ -287,6 +349,7 @@ async def upload(file: list[UploadFile] = File(...)) -> dict:
             "chunks_per_sec": None,
             "error": None,
         }
+    _persist_job(job_id)
     threading.Thread(target=_run_ingest_job, args=(job_id, accepted), daemon=True).start()
     return {"job_id": job_id, "filenames": [f["name"] for f in accepted],
             "count": len(accepted), "state": "running",
@@ -321,7 +384,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
             import time as _t
             _t0 = _t.perf_counter()
             hits = rag.retrieve(req.question)
-            print(f"[chat] retrieve {_t.perf_counter() - _t0:.2f}s, hits={len(hits)}", flush=True)
+            logging.getLogger(__name__).info(f"[chat] retrieve {_t.perf_counter() - _t0:.2f}s, hits={len(hits)}")
             sources = rag.make_sources(hits, req.question)
             yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
 
@@ -351,7 +414,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                         cleaned = rag.clean_answer(head)
                         if cleaned:
                             if not first_sent:
-                                print(f"[chat] first sentence {_t.perf_counter() - _t1:.2f}s", flush=True)
+                                logging.getLogger(__name__).info(f"[chat] first sentence {_t.perf_counter() - _t1:.2f}s")
                                 first_sent = True
                             collected.append(cleaned)
                             yield f"event: token\ndata: {json.dumps(cleaned, ensure_ascii=False)}\n\n"
@@ -524,13 +587,13 @@ def highlight_file(name: str, page: int = 1, page_end: int | None = None,
     if hit_count == 0:
         # 没匹配上：不写缓存，直接返回原文件（只跳页），下次请求还能重新尝试
         doc.close()
-        print(f"[highlight] {safe} p.{page_no} 未命中，返回原文件（不缓存）", flush=True)
+        logging.getLogger(__name__).info(f"[highlight] {safe} p.{page_no} 未命中，返回原文件（不缓存）")
         return FileResponse(str(target), media_type="application/pdf", filename=safe,
                             content_disposition_type="inline")
 
     doc.save(str(cached), deflate=True, garbage=3)
     doc.close()
-    print(f"[highlight] {safe} p.{hit_page} 命中 {hit_count} 处（缓存 {key}）", flush=True)
+    logging.getLogger(__name__).info(f"[highlight] {safe} p.{hit_page} 命中 {hit_count} 处（缓存 {key}）")
     return FileResponse(str(cached), media_type="application/pdf", filename=safe,
                         content_disposition_type="inline")
 

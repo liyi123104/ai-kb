@@ -115,9 +115,8 @@
           @keyup.enter="send"
         >
           <template #append>
-            <el-button :loading="streaming" :disabled="!question.trim()" @click="send">
-              发送
-            </el-button>
+            <el-button v-if="streaming" type="danger" plain @click="stopStreaming">停止</el-button>
+            <el-button v-else :disabled="!question.trim()" @click="send">发送</el-button>
           </template>
         </el-input>
         <div class="hint">当前会话：{{ sessionId || '（新会话）' }}</div>
@@ -128,8 +127,8 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { deleteFile, fileUrl, getFiles, getProviders, getUploadProgress, streamChat, uploadFiles } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { deleteFile, fileUrl, getFiles, getProviders, getUploadProgress, setToken, streamChat, uploadFiles } from '../api'
 
 const files = ref([])
 const messages = ref([])
@@ -140,6 +139,7 @@ const currentAnswer = ref('')
 const uploading = ref(false)
 const uploadPercent = ref(0)
 const ingestLabel = ref('')
+let streamCtrl = null
 const scrollRef = ref(null)
 const providers = ref([])
 // provider 下拉框里存的是 "provider:model" 形式的 id（如 ollama:qwen2.5:7b）
@@ -181,11 +181,32 @@ async function scrollToBottom() {
   if (scrollRef.value) scrollRef.value.scrollTop = scrollRef.value.scrollHeight
 }
 
+// 后端启用了 AUTH_TOKEN 时会返回 401，这里提示输入令牌并重载
+async function promptToken() {
+  try {
+    const { value } = await ElMessageBox.prompt('后端启用了访问令牌，请输入（保存在本机浏览器）', '提示输入访问令牌', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputPlaceholder: 'AUTH_TOKEN'
+    })
+    if (value) {
+      setToken(value.trim())
+      window.location.reload()
+    }
+  } catch (e) {
+    /* 用户取消 */
+  }
+}
+
 async function loadFiles() {
   try {
     const { data } = await getFiles()
     files.value = data
   } catch (err) {
+    if (err?.response?.status === 401) {
+      await promptToken()
+      return
+    }
     const detail = err?.response?.data?.detail || err.message
     ElMessage.error(`读取文件列表失败：${detail}（HTTP ${err?.response?.status || '?'}）`)
   }
@@ -270,6 +291,10 @@ async function removeFile(name) {
 function askExample(q) {
   question.value = q
   send()
+}
+
+function stopStreaming() {
+  if (streamCtrl) streamCtrl.abort()
 }
 
 async function send() {

@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id);
+CREATE TABLE IF NOT EXISTS upload_jobs (
+    id          TEXT PRIMARY KEY,
+    payload     TEXT NOT NULL,
+    state       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 
@@ -114,3 +120,36 @@ def list_sessions(limit: int = 20) -> list[dict]:
         ).fetchall()
     return [{"session_id": r["id"], "created_at": r["created_at"],
              "messages": r["messages"]} for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# 上传任务（放在 SQLite 里，服务重启后仍能查询到结果）
+# --------------------------------------------------------------------------- #
+def save_upload_job(job: dict, updated_at: str) -> None:
+    """写或更新一个上传任务；payload 存整个 job 的 JSON。"""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO upload_jobs (id, payload, state, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, "
+            "state=excluded.state, updated_at=excluded.updated_at",
+            (job["job_id"], json.dumps(job, ensure_ascii=False), job.get("state", "running"), updated_at),
+        )
+
+
+def get_upload_job(job_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT payload FROM upload_jobs WHERE id = ?", (job_id,)).fetchone()
+    return json.loads(row["payload"]) if row else None
+
+
+def mark_interrupted_jobs(now: str) -> int:
+    """服务启动时把上次残留的 running 任务标记为中断，避免前端一直等。"""
+    with _connect() as conn:
+        rows = conn.execute("SELECT id, payload FROM upload_jobs WHERE state = 'running'").fetchall()
+        for row in rows:
+            job = json.loads(row["payload"])
+            job["state"] = "interrupted"
+            job["error"] = "服务重启，任务已中断（文件已保存，可重新上传）"
+            conn.execute("UPDATE upload_jobs SET payload = ?, state = ?, updated_at = ? WHERE id = ?",
+                         (json.dumps(job, ensure_ascii=False), "interrupted", now, row["id"]))
+    return len(rows)

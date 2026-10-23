@@ -124,7 +124,16 @@ def main() -> int:
     args = parser.parse_args()
 
     vs = get_vectorstore()
-    data = vs._collection.get(include=["documents", "metadatas"], limit=20000)
+    # 分页读取：语料超过 SQLite 变量上限时一次性取会报错
+    data = {"documents": [], "metadatas": []}
+    offset = 0
+    while True:
+        part = vs._collection.get(include=["documents", "metadatas"], limit=1000, offset=offset)
+        data["documents"] += part["documents"]
+        data["metadatas"] += part["metadatas"]
+        if len(part["documents"]) < 1000:
+            break
+        offset += 1000
     by_file: dict[str, list[dict]] = defaultdict(list)
     skipped_ref = 0
     for text, md in zip(data["documents"], data["metadatas"]):

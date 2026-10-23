@@ -6,6 +6,23 @@ import axios from 'axios'
 
 const http = axios.create({ baseURL: '/api', timeout: 600000 })
 
+// 访问令牌：后端启用 AUTH_TOKEN 时前端才能调通。
+// 令牌存在 localStorage，第一次遇到 401 时会提示填写。
+export function getToken() {
+  return localStorage.getItem('ai-kb-token') || ''
+}
+
+export function setToken(token) {
+  if (token) localStorage.setItem('ai-kb-token', token)
+  else localStorage.removeItem('ai-kb-token')
+}
+
+http.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) config.headers['X-Auth-Token'] = token
+  return config
+})
+
 export function getHealth() {
   return http.get('/health')
 }
@@ -30,11 +47,15 @@ export function fileUrl(name, page, snippet, question, pageEnd) {
     const q = encodeURIComponent(snippet)
     const ask = question ? `&question=${encodeURIComponent(question)}` : ''
     const end = pageEnd && pageEnd > (page || 1) ? `&page_end=${pageEnd}` : ''
-    return `/api/files/${encoded}/highlight?page=${page || 1}${end}&q=${q}${ask}#page=${page || 1}`
+    const token = getToken()
+    const auth = token ? `&token=${encodeURIComponent(token)}` : ''
+    return `/api/files/${encoded}/highlight?page=${page || 1}${end}&q=${q}${ask}${auth}#page=${page || 1}`
   }
   // PDF / MD / TXT 直接内嵌打开；PDF 用 #page=N 跳页
   const base = `/api/files/${encoded}/raw`
-  return page ? `${base}#page=${page}` : base
+  const token = getToken()
+  const q = token ? `${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : ''
+  return page ? `${base}${q}#page=${page}` : `${base}${q}`
 }
 
 export function getUploadProgress(jobId) {

@@ -357,8 +357,9 @@ def ingest_file(path: Path, source_name: str | None = None, batch: int = 64,
 
     elapsed = time.perf_counter() - started
     rate = len(chunks) / elapsed if elapsed else 0
-    print(f"[ingest] {name}: {len(chunks)} 片，{elapsed:.1f}s（{rate:.1f} 片/秒，"
-          f"{'GPU' if used_gpu else 'CPU'}）", flush=True)
+    logging.getLogger(__name__).info(
+        "[ingest] %s: %d 片，%.1fs（%.1f 片/秒，%s）", name, len(chunks), elapsed, rate,
+        "GPU" if used_gpu else "CPU")
 
     if used_gpu:
         _unload_embedder(embedder)  # 用完把显存还给生成模型
