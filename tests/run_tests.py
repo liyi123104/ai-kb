@@ -23,7 +23,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-BASE = "http://127.0.0.1:8000"
+def _default_base() -> str:
+    """按 .env 的 APP_PORT 推断地址，避免和别的项目抢 8000。"""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from app.config import settings
+        host = "127.0.0.1" if settings.host in ("0.0.0.0", "127.0.0.1") else settings.host
+        return f"http://{host}:{settings.port}"
+    except Exception:  # noqa: BLE001
+        return "http://127.0.0.1:8010"
+
+
+BASE = _default_base()
+
+
+def _auth_header() -> dict:
+    """启用了 AUTH_TOKEN 时自动带上令牌（从 .env 读）。"""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from app.config import settings
+        return {"X-Auth-Token": settings.auth_token} if settings.auth_token else {}
+    except Exception:  # noqa: BLE001
+        return {}
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -31,7 +52,7 @@ RESULTS: list[tuple[str, bool, str]] = []
 def http(method: str, path: str, body=None, timeout: int = 300):
     """返回 (status, headers, 解析后的 body)；HTTP 错误也返回状态码而不抛异常。"""
     data = None
-    headers = {}
+    headers = dict(_auth_header())
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -66,7 +87,7 @@ def upload_files(items: list[tuple[str, bytes]]) -> tuple[int, dict]:
     body += f"--{boundary}--\r\n".encode()
     req = urllib.request.Request(
         BASE + "/upload", data=body, method="POST",
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}", **_auth_header()},
     )
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
@@ -106,7 +127,7 @@ def upload(filename: str, content: bytes) -> tuple[int, dict]:
     ).encode() + content + f"\r\n--{boundary}--\r\n".encode()
     req = urllib.request.Request(
         BASE + "/upload", data=body, method="POST",
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}", **_auth_header()},
     )
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
@@ -141,7 +162,7 @@ def stream_events(question: str, provider=None, model=None, timeout: int = 300):
         payload["model"] = model
     req = urllib.request.Request(
         BASE + "/chat/stream", data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"}, method="POST",
+        headers={"Content-Type": "application/json", **_auth_header()}, method="POST",
     )
     events = []
     name = None

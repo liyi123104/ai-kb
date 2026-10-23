@@ -5,6 +5,11 @@
 
 ## 先决条件（两条路线共用）
 
+> **公网部署必须做的一步**：在 `.env` 里设置 `AUTH_TOKEN=<任意随机串>`。
+> 本项目默认不鉴权，一旦暴露公网，任何人都能上传或删除你的资料。
+> 设置后所有接口要求请求头 `X-Auth-Token`，文件链接可带 `?token=`；
+> 前端第一次打开会弹窗让你填令牌。
+
 1. 本机能跑通：后端 `python -m app.main`、前端 `cd web; npm run dev`；
 2. Ollama 在跑，模型 `bge-m3`、`qwen2.5:7b` 已拉取；
 3. 项目根目录 `D:\ai-kb`，`.env` 已按 `.env.example` 配好。
@@ -24,8 +29,8 @@
 ### A-2 打两个隧道
 
 ```powershell
-# 后端（8000）—— 注意用 http 隧道
-cpolar http 8000
+# 后端（8010）—— 注意用 http 隧道
+cpolar http 8010
 # 前端（5173）
 cpolar http 5173
 ```
@@ -33,13 +38,13 @@ cpolar http 5173
 或用 ngrok：
 
 ```powershell
-ngrok http 8000
+ngrok http 8010
 ngrok http 5173
 ```
 
 ### A-3 前端要指向公网后端
 
-当前前端用 Vite 代理 `/api` → 本机 8000，公网访问时这条代理不生效，需要改一处：
+当前前端用 Vite 代理 `/api` → 本机 8010，公网访问时这条代理不生效，需要改一处：
 
 ```bash
 # web/.env.production 新建，写后端公网地址

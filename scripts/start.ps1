@@ -61,7 +61,7 @@ if (-not (Wait-Url 'http://127.0.0.1:11434/api/version' 30 'Ollama 服务')) {
 # 2) 后端
 $backendUp = $false
 try {
-    $r = Invoke-WebRequest 'http://127.0.0.1:8000/health' -TimeoutSec 2 -UseBasicParsing
+    $r = Invoke-WebRequest 'http://127.0.0.1:8010/health' -TimeoutSec 2 -UseBasicParsing
     $backendUp = ($r.StatusCode -eq 200)
 } catch { }
 if (-not $backendUp) {
@@ -73,7 +73,7 @@ if (-not $backendUp) {
         exit 1
     }
     Start-Process -FilePath $py -ArgumentList '-m', 'app.main' -WorkingDirectory $root -WindowStyle Hidden
-    if (-not (Wait-Url 'http://127.0.0.1:8000/health' 60 '后端 8000')) {
+    if (-not (Wait-Url 'http://127.0.0.1:8010/health' 60 '后端 8010')) {
         Read-Host "后端启动失败，按回车退出"
         exit 1
     }
@@ -107,6 +107,6 @@ if (-not $frontendUp) {
 Write-Host ""
 Write-Host "=== 全部就绪，正在打开浏览器 ===" -ForegroundColor Green
 Write-Host "  前端界面 : http://127.0.0.1:5173"
-Write-Host "  后端文档 : http://127.0.0.1:8000/docs"
+Write-Host "  后端文档 : http://127.0.0.1:8010/docs"
 Start-Process 'http://127.0.0.1:5173'
 Start-Sleep -Seconds 2

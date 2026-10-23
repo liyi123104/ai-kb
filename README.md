@@ -65,6 +65,12 @@ DOCX 浏览器渲染不了，由后端转成网页直接阅读（见截图）。
 双击项目根目录的 **`start.bat`** —— 它会依次检查 Ollama、启动后端、启动前端，全部就绪后自动打开浏览器。
 关闭服务双击 **`stop.bat`**（Ollama 保持运行，下次更快）。
 
+### 端口说明
+
+本项目的后端默认跑在 **8010**（`.env` 的 `APP_PORT`），前端 5173 的 `/api` 代理指向 8010。
+之所以不用 8000，是因为它常被本机其他项目占用 —— 一旦被占，前端代理会打到别人的后端上，
+表现为莫名其妙的 404 / 500。改端口只需同时改 `.env` 的 `APP_PORT` 与 `web/vite.config.js` 的代理目标。
+
 ### 方式二：手动起三条命令
 
 ```powershell
@@ -76,7 +82,7 @@ py -3.12 -m venv .venv
 Copy-Item .env.example .env
 
 # 3) 起服务
-.\.venv\Scripts\python.exe -m app.main          # http://127.0.0.1:8000/docs
+.\.venv\Scripts\python.exe -m app.main          # http://127.0.0.1:8010/docs
 .\.venv\Scripts\python.exe -m streamlit run ui_streamlit.py   # 临时界面 http://localhost:8501
 
 # 4) 产品界面（Vue3）
@@ -144,7 +150,7 @@ docker compose down               # 停止
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 512 / 50 | 切片参数 |
 | `TOP_K` | 5 | 检索条数 |
 | `RAG_SCORE_GATE` | 0.45 | 最佳相似度低于此值直接答「资料中没有相关内容」 |
-| `APP_PORT` | 8000 | 服务端口 |
+| `APP_PORT` | 8010 | 服务端口（避开常被其他项目占用的 8000） |
 
 `.env` 不进 Git，模板见 `.env.example`。
 
