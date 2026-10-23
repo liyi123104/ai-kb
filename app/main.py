@@ -377,12 +377,23 @@ def list_files() -> list[dict]:
 
     语料既可能来自 /upload（在 data/uploads），也可能是 scripts 批量入库的
     materials 目录，因此两处都查；都找不到时 size/uploaded_at 返回 null。
+
+    注意：不能一次性 get() 全部记录——记录一多（本项目 9,000+ 条）就会触发
+    SQLite 的「too many SQL variables」，所以按页读取再汇总。
     """
     vs = rag.get_vectorstore()
-    data = vs._collection.get(include=["metadatas"])  # noqa: SLF001
     counts: dict[str, int] = {}
-    for md in data.get("metadatas", []):
-        counts[md["source"]] = counts.get(md["source"], 0) + 1
+    offset, page = 0, 1000
+    while True:
+        part = vs._collection.get(include=["metadatas"], limit=page, offset=offset)  # noqa: SLF001
+        metas = part.get("metadatas") or []
+        for md in metas:
+            source = md.get("source")
+            if source:
+                counts[source] = counts.get(source, 0) + 1
+        if len(metas) < page:
+            break
+        offset += page
 
     root = settings.data_dir.parent
     files = []

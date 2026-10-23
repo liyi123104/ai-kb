@@ -186,7 +186,8 @@ async function loadFiles() {
     const { data } = await getFiles()
     files.value = data
   } catch (err) {
-    ElMessage.error(`读取文件列表失败：${err.message}（后端启动了吗？）`)
+    const detail = err?.response?.data?.detail || err.message
+    ElMessage.error(`读取文件列表失败：${detail}（HTTP ${err?.response?.status || '?'}）`)
   }
 }
 
