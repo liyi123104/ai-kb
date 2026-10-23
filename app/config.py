@@ -96,6 +96,9 @@ class Settings:
     # 访问令牌：留空表示不启用（本机自用）。填了之后所有接口都要求带 X-Auth-Token，
     # 文件类 GET 接口也接受 ?token= 参数（浏览器直接打开链接时没法带请求头）。
     auth_token: str = _get("AUTH_TOKEN", "")
+    # 列表式重排：用生成模型对 Top-K 候选排一次序（一次调用，约 1 秒）
+    # Ollama 0.13 没有 /api/rerank，所以走提示词排序；关掉则保持纯向量顺序
+    rerank_enabled: bool = _get_bool("RERANK", False)
 
     # ---- 服务 ----
     host: str = _get("APP_HOST", "0.0.0.0")

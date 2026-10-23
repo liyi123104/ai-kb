@@ -69,6 +69,28 @@ $env:CHROMA_COLLECTION='exp-1024'; $env:CHUNK_SIZE='1024'; $env:CHUNK_OVERLAP='5
 **结论**：拒答规则越硬，正常问题被误拒越多。采用"有事实就答、完全没依据才拒答"的版本，
 两项验收（拒答明确、准确率 ≥70%）同时满足。
 
+## E2 重排实验（用生成模型做 listwise rerank）— 已完成，结论：不采用
+
+Ollama 0.13 没有 /api/rerank 接口（实测 404），拿不到 cross-encoder 分数。
+退而求其次：让 qwen2.5:7b 看完全部 5 个候选后输出一个排序（一次调用，约 1 秒）。
+
+| 指标 | 基线（纯向量） | 开启重排 |
+|---|---|---|
+| 命中 | 27/30 | 27/30 |
+| **Top-1** | **19** | **13（更差）** |
+| 平均名次 | **1.48** | **1.78（更差）** |
+| 准确率 | 22/30（73.3%） | 22/30（73.3%） |
+| 检索耗时 | 0.32s | **1.52s（慢 5 倍）** |
+
+**结论：不采用。** 7B 模型做相关性排序不可靠——最典型的一例是把相似度最高、
+确实包含定义的那一片（d2l-zh p.434）排到了第 5 位。排序变差、延迟变高、准确率没动。
+
+代码保留在 `rag.rerank()`，用 `RERANK=1` 可复现，默认关闭。
+
+要真正做重排，必须用 cross-encoder（如 bge-reranker-v2-m3）。当前 Ollama 没有原生
+rerank 接口，只能拉社区模型再用「Query/Document/Relevance」提示词打分，
+这条路是否稳定尚未验证（需要先 `ollama pull awenleven/bge-reranker-v2-m3`，约 600MB）。
+
 ## E8 PDF 解析器对比（pypdf vs PyMuPDF）— 已完成
 
 | 项 | pypdf | PyMuPDF (fitz) |
@@ -85,11 +107,6 @@ $env:CHROMA_COLLECTION='exp-1024'; $env:CHUNK_SIZE='1024'; $env:CHUNK_OVERLAP='5
 
 需要额外拉取模型：`ollama pull bge-large`（约 1.2GB）、`ollama pull bge-small`（约 0.1GB）。
 按项目约定，软件/模型安装由用户执行，拉取后再补测（换模型必须重建索引，每次约 50 分钟）。
-
-## E2 重排序 rerank（关闭 / 开启）— 未执行
-
-需要 reranker 模型（如 `bge-reranker-v2-m3`），同样需用户拉取。
-另外重排序会改变 Top-5 的构成，需先确定命中判定口径（重排后按重排结果算命中），执行前会先说明方案。
 
 ## E4 chunk overlap（0% / 20% / 50%）— 已完成
 

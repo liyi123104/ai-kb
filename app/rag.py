@@ -395,13 +395,52 @@ def is_low_value(text: str) -> bool:
     return meaningful / len(text) < 0.35
 
 
+def rerank(hits: list[tuple], question: str) -> list[tuple]:
+    """用生成模型对候选做一次列表式重排（listwise）。
+
+    背景：Ollama 0.13 没有 /api/rerank 接口，无法直接调 cross-encoder；
+    但可以让模型看完全部候选后输出一个排序，实测 0.8–1.1 秒/次、输出稳定为合法排列。
+    失败（输出不是合法排列）时原样返回，不影响主流程。
+    """
+    from app.llm import get_llm
+
+    if len(hits) < 2:
+        return hits
+    lines = []
+    for i, (doc, _dist) in enumerate(hits, start=1):
+        text = re.sub(r"\s+", " ", doc.page_content)[:220]
+        lines.append(f"[{i}] {text}")
+    prompt = (
+        "你是检索结果排序器。根据问题判断下面片段的相关性，只输出序号，"
+        "按相关性从高到低用逗号分隔（例如 3,1,5,2,4），不要解释。\n\n"
+        f"问题：{question}\n\n" + "\n".join(lines) + "\n\n排序结果："
+    )
+    try:
+        resp = get_llm().invoke(prompt)
+        text = resp.content if isinstance(resp.content, str) else str(resp.content)
+        order = [int(x) for x in re.findall(r"\d", text)][: len(hits)]
+        if sorted(order) != list(range(1, len(hits) + 1)):
+            return hits   # 不是合法排列：保留原顺序
+        reranked = [hits[i - 1] for i in order]
+        return reranked
+    except Exception as exc:  # noqa: BLE001 - 重排失败不应让检索失败
+        logging.getLogger(__name__).warning("rerank 失败，保留向量顺序：%s", exc)
+        return hits
+
+
 def retrieve(question: str, k: int | None = None) -> list[tuple]:
-    """检索并过滤低价值碎片。返回 [(Document, distance), ...]。"""
+    """检索并过滤低价值碎片。返回 [(Document, distance), ...]。
+
+    开启 RERANK 后，取回候选再用生成模型做一次列表式重排（一次调用，约 1 秒）。
+    """
     k = k or settings.top_k
     vs = get_vectorstore()
     pool = vs.similarity_search_with_score(question, k=max(k * 4, 12))
     kept = [(d, s) for d, s in pool if not is_low_value(d.page_content)]
-    return kept[:k]
+    hits = kept[:k]
+    if settings.rerank_enabled and len(hits) > 1:
+        hits = rerank(hits, question)
+    return hits
 
 
 def page_label(md: dict) -> str:
