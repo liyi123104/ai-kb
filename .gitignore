@@ -52,3 +52,6 @@ data/edge-*/
 
 # 计划书 v1.0 备份（历史留档，不进库）
 docs/*_v1.0_backup.docx
+
+# 打包产物（scripts/package.py 生成）
+dist/

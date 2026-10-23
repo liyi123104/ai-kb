@@ -163,7 +163,9 @@ const examples = [
 
 function openSource(source, question) {
   // 浏览器内置 PDF 阅读器支持 #page=N，直接跳转到该页
-  window.open(fileUrl(source.file, source.page_start, source.text || source.snippet, question, source.page_end), '_blank')
+  // 只送 200 字定位：太长会被代理/浏览器拒绝，而且足够找到命中的句子
+  const snippet = (source.text || source.snippet || '').slice(0, 200)
+  window.open(fileUrl(source.file, source.page_start, snippet, question, source.page_end), '_blank')
 }
 
 function openFile(name) {

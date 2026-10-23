@@ -576,6 +576,8 @@ def highlight_file(name: str, page: int = 1, page_end: int | None = None,
     下次点同一条出处就再也看不到标记了（这就是之前“高亮消失”的原因）。
     """
     safe = Path(name).name
+    q = (q or "")[:600]          # 防御：超长片段会撑爆 URL，定位用不着这么多字
+    question = (question or "")[:200]
     candidates = [settings.uploads_dir / safe, settings.data_dir.parent / "materials" / safe]
     target = next((p for p in candidates if p.is_file()), None)
     if target is None:
