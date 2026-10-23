@@ -184,7 +184,7 @@ async function scrollToBottom() {
 // 后端启用了 AUTH_TOKEN 时会返回 401，这里提示输入令牌并重载
 async function promptToken() {
   try {
-    const { value } = await ElMessageBox.prompt('后端启用了访问令牌，请输入（保存在本机浏览器）', '提示输入访问令牌', {
+    const { value } = await ElMessageBox.prompt('请粘贴 .env 文件里 AUTH_TOKEN 的值（保存在本机浏览器）', '提示输入访问令牌', {
       confirmButtonText: '保存',
       cancelButtonText: '取消',
       inputPlaceholder: 'AUTH_TOKEN'
@@ -331,8 +331,17 @@ async function send() {
       }
     })
   } catch (err) {
-    reply.content = `请求失败：${err.message}`
-    ElMessage.error(`问答失败：${err.message}`)
+    const msg = String(err?.message || '')
+    if (err?.name === 'AbortError') {
+      reply.content = reply.content || '（已停止生成）'
+    } else if (msg.includes('401')) {
+      // 令牌缺失或错误：清掉气泡里的报错，提示重新输入
+      reply.content = ''
+      await promptToken()
+    } else {
+      reply.content = `请求失败：${msg}`
+      ElMessage.error(`问答失败：${msg}`)
+    }
   } finally {
     streaming.value = false
     currentAnswer.value = ''
@@ -351,6 +360,15 @@ async function loadProviders() {
 }
 
 onMounted(() => {
+  // 支持用链接直接带令牌：http://127.0.0.1:5173/?token=xxx
+  const params = new URLSearchParams(window.location.search)
+  const urlToken = params.get('token')
+  if (urlToken) {
+    setToken(urlToken.trim())
+    params.delete('token')
+    const qs = params.toString()
+    window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+  }
   loadProviders()
   loadFiles()
 })
