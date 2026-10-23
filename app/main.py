@@ -31,7 +31,7 @@ from urllib.parse import quote
 
 from docx import Document
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse, StreamingResponse)
 from pydantic import BaseModel, Field
@@ -51,8 +51,20 @@ ALLOWED_SUFFIXES = rag.SUPPORTED_SUFFIXES
 MAX_UPLOAD_MB = 100
 
 
-# 不需要鉴权的路径：健康检查（容器 healthcheck 要用）与接口文档
-_AUTH_EXEMPT = {"/health", "/docs", "/openapi.json", "/redoc"}
+# 不需要鉴权的路径：健康检查（容器 healthcheck 要用）、接口文档与登录接口
+_AUTH_EXEMPT = {"/health", "/docs", "/openapi.json", "/redoc", "/login", "/logout", "/auth/status"}
+SESSION_COOKIE = "ai_kb_session"
+
+
+def _session_value() -> str:
+    """由令牌派生的会话值：无状态、改令牌即全部失效。"""
+    import hashlib
+
+    return hashlib.sha256(f"{settings.auth_token}|ai-kb-session".encode()).hexdigest()
+
+
+class LoginRequest(BaseModel):
+    token: str = Field(..., description="AUTH_TOKEN 的值")
 
 
 @app.middleware("http")
@@ -63,9 +75,11 @@ async def require_token(request: Request, call_next):
     """
     token = settings.auth_token
     if token and request.url.path not in _AUTH_EXEMPT:
+        # 三选一：登录后的会话 cookie / 请求头令牌 / 链接里的 ?token=
+        cookie_ok = request.cookies.get(SESSION_COOKIE) == _session_value()
         given = request.headers.get("x-auth-token") or request.query_params.get("token")
-        if given != token:
-            return JSONResponse(status_code=401, content={"detail": "缺少或错误的访问令牌"})
+        if not cookie_ok and given != token:
+            return JSONResponse(status_code=401, content={"detail": "未登录或登录已失效"})
     return await call_next(request)
 
 
@@ -432,6 +446,37 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
             yield f"event: error\ndata: {json.dumps(str(exc), ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/login")
+def login(req: LoginRequest, response: Response) -> dict:
+    """用 AUTH_TOKEN 换一个会话 cookie；之后所有请求靠 cookie 鉴权，不用再带令牌。"""
+    if not settings.auth_token:
+        return {"ok": True, "auth_required": False}
+    import hmac
+
+    if not hmac.compare_digest(req.token.strip(), settings.auth_token):
+        raise HTTPException(status_code=401, detail="令牌不正确")
+    response.set_cookie(
+        key=SESSION_COOKIE, value=_session_value(),
+        max_age=7 * 24 * 3600, httponly=True, samesite="lax", path="/",
+    )
+    return {"ok": True, "auth_required": True, "expires_in": 7 * 24 * 3600}
+
+
+@app.post("/logout")
+def logout(response: Response) -> dict:
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/auth/status")
+def auth_status(request: Request) -> dict:
+    """前端用它判断要不要弹登录框。"""
+    if not settings.auth_token:
+        return {"auth_required": False, "logged_in": True}
+    return {"auth_required": True,
+            "logged_in": request.cookies.get(SESSION_COOKIE) == _session_value()}
 
 
 @app.get("/files")

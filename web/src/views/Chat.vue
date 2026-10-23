@@ -119,7 +119,7 @@
             <el-button v-else :disabled="!question.trim()" @click="send">发送</el-button>
           </template>
         </el-input>
-        <div class="hint">当前会话：{{ sessionId || '（新会话）' }}</div>
+        <div class="hint">当前会话：{{ sessionId || '（新会话）' }}<a class="logout" @click="signOut">退出登录</a></div>
       </div>
     </el-main>
   </el-container>
@@ -128,7 +128,8 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { deleteFile, fileUrl, getFiles, getProviders, getUploadProgress, setToken, streamChat, uploadFiles } from '../api'
+import { authStatus, deleteFile, fileUrl, getFiles, login, logout,
+         getProviders, getUploadProgress, streamChat, uploadFiles } from '../api'
 
 const files = ref([])
 const messages = ref([])
@@ -181,20 +182,29 @@ async function scrollToBottom() {
   if (scrollRef.value) scrollRef.value.scrollTop = scrollRef.value.scrollHeight
 }
 
-// 后端启用了 AUTH_TOKEN 时会返回 401，这里提示输入令牌并重载
+// 登录一次即可：成功后后端下发会话 Cookie，后续请求与文件链接都不用再带令牌
+async function doLogin(token) {
+  await login(String(token).trim())
+  window.location.reload()
+}
+
 async function promptToken() {
   try {
-    const { value } = await ElMessageBox.prompt('请粘贴 .env 文件里 AUTH_TOKEN 的值（保存在本机浏览器）', '提示输入访问令牌', {
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-      inputPlaceholder: 'AUTH_TOKEN'
-    })
-    if (value) {
-      setToken(value.trim())
-      window.location.reload()
-    }
+    const { value } = await ElMessageBox.prompt(
+      '请输入访问令牌（.env 文件里的 AUTH_TOKEN）。登录一次后不再需要输入。',
+      '登录', { confirmButtonText: '登录', cancelButtonText: '取消', inputPlaceholder: 'AUTH_TOKEN' }
+    )
+    if (value) await doLogin(value)
   } catch (e) {
     /* 用户取消 */
+  }
+}
+
+async function signOut() {
+  try {
+    await logout()
+  } finally {
+    window.location.reload()
   }
 }
 
@@ -359,15 +369,29 @@ async function loadProviders() {
   }
 }
 
-onMounted(() => {
-  // 支持用链接直接带令牌：http://127.0.0.1:5173/?token=xxx
+onMounted(async () => {
+  // 支持用链接直接登录：http://127.0.0.1:5173/?token=xxx
   const params = new URLSearchParams(window.location.search)
   const urlToken = params.get('token')
   if (urlToken) {
-    setToken(urlToken.trim())
     params.delete('token')
     const qs = params.toString()
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+    try {
+      await doLogin(urlToken)   // 成功后 reload
+      return
+    } catch (e) {
+      ElMessage.error('链接里的令牌不正确')
+    }
+  }
+  try {
+    const { data } = await authStatus()
+    if (data.auth_required && !data.logged_in) {
+      await promptToken()
+      return
+    }
+  } catch (e) {
+    /* 没有该接口就跳过 */
   }
   loadProviders()
   loadFiles()
@@ -536,6 +560,12 @@ onMounted(() => {
 .input-area {
   border-top: 1px solid #ebeef5;
   padding: 12px 24px 16px;
+}
+.logout {
+  margin-left: 12px;
+  color: #909399;
+  cursor: pointer;
+  text-decoration: underline;
 }
 .hint {
   font-size: 12px;

@@ -6,22 +6,19 @@ import axios from 'axios'
 
 const http = axios.create({ baseURL: '/api', timeout: 600000 })
 
-// 访问令牌：后端启用 AUTH_TOKEN 时前端才能调通。
-// 令牌存在 localStorage，第一次遇到 401 时会提示填写。
-export function getToken() {
-  return localStorage.getItem('ai-kb-token') || ''
+// 鉴权改由「登录一次 + 会话 Cookie」完成：登录后浏览器自动带 Cookie，
+// 普通请求与文件链接都不需要再附加令牌。
+export function login(token) {
+  return http.post('/login', { token })
 }
 
-export function setToken(token) {
-  if (token) localStorage.setItem('ai-kb-token', token)
-  else localStorage.removeItem('ai-kb-token')
+export function logout() {
+  return http.post('/logout')
 }
 
-http.interceptors.request.use((config) => {
-  const token = getToken()
-  if (token) config.headers['X-Auth-Token'] = token
-  return config
-})
+export function authStatus() {
+  return http.get('/auth/status')
+}
 
 export function getHealth() {
   return http.get('/health')
@@ -47,15 +44,11 @@ export function fileUrl(name, page, snippet, question, pageEnd) {
     const q = encodeURIComponent(snippet)
     const ask = question ? `&question=${encodeURIComponent(question)}` : ''
     const end = pageEnd && pageEnd > (page || 1) ? `&page_end=${pageEnd}` : ''
-    const token = getToken()
-    const auth = token ? `&token=${encodeURIComponent(token)}` : ''
-    return `/api/files/${encoded}/highlight?page=${page || 1}${end}&q=${q}${ask}${auth}#page=${page || 1}`
+    return `/api/files/${encoded}/highlight?page=${page || 1}${end}&q=${q}${ask}#page=${page || 1}`
   }
   // PDF / MD / TXT 直接内嵌打开；PDF 用 #page=N 跳页
   const base = `/api/files/${encoded}/raw`
-  const token = getToken()
-  const q = token ? `${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : ''
-  return page ? `${base}${q}#page=${page}` : `${base}${q}`
+  return page ? `${base}#page=${page}` : base
 }
 
 export function getUploadProgress(jobId) {

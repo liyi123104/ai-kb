@@ -48,7 +48,7 @@ torchinductor_*/
 data/tmp/
 
 # 截图脚本用的 Edge 临时配置
-data/edge-profile*/
+data/edge-*/
 
 # 计划书 v1.0 备份（历史留档，不进库）
 docs/*_v1.0_backup.docx
