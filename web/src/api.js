@@ -49,15 +49,21 @@ export function deleteFile(name) {
   return http.delete(`/files/${encodeURIComponent(name)}`)
 }
 
-export function uploadFile(file, onProgress) {
+export function uploadFiles(files, onProgress) {
+  const list = Array.isArray(files) ? files : [files]
   const form = new FormData()
-  form.append('file', file)
+  list.forEach((f) => form.append('file', f))
   return http.post('/upload', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => {
       if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
     }
   })
+}
+
+// 兼容单文件调用
+export function uploadFile(file, onProgress) {
+  return uploadFiles([file], onProgress)
 }
 
 /**

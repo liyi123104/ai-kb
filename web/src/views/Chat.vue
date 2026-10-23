@@ -20,14 +20,15 @@
       <el-upload
         class="uploader"
         drag
+        multiple
         :show-file-list="false"
         :auto-upload="false"
         accept=".pdf,.docx,.md,.txt"
         :on-change="handleFileChange"
       >
         <div class="upload-tip">
-          <div>把 PDF / Word / MD / TXT 拖到这里</div>
-          <div class="sub">或点击选择文件</div>
+          <div>把 PDF / Word / MD / TXT 拖到这里（可多选）</div>
+          <div class="sub">或点击选择文件，支持一次选多个</div>
         </div>
       </el-upload>
 
@@ -128,7 +129,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { deleteFile, fileUrl, getFiles, getProviders, getUploadProgress, streamChat, uploadFile } from '../api'
+import { deleteFile, fileUrl, getFiles, getProviders, getUploadProgress, streamChat, uploadFiles } from '../api'
 
 const files = ref([])
 const messages = ref([])
@@ -189,18 +190,32 @@ async function loadFiles() {
   }
 }
 
-async function handleFileChange(uploadFileObj) {
+// 多选文件时 el-upload 会逐个触发 on-change，这里攒 400ms 一起提交，
+// 后端会把这批文件放进同一个入库任务里顺序处理（只切一次模型）
+const pendingFiles = ref([])
+let flushTimer = null
+
+function handleFileChange(uploadFileObj) {
   const raw = uploadFileObj.raw
   if (!raw) return
   if (raw.size > 100 * 1024 * 1024) {
-    ElMessage.error('文件超过 100MB，请换小一点的')
+    ElMessage.error(`${raw.name} 超过 100MB，已跳过`)
     return
   }
+  pendingFiles.value.push(raw)
+  if (flushTimer) clearTimeout(flushTimer)
+  flushTimer = setTimeout(flushUploads, 400)
+}
+
+async function flushUploads() {
+  const files = pendingFiles.value.splice(0)
+  if (!files.length) return
   uploading.value = true
   uploadPercent.value = 0
+  ingestLabel.value = files.length > 1 ? `${files.length} 个文件上传中…` : `${files[0].name} 上传中…`
   try {
     // 上传只负责把文件传上去，入库在后台跑；随后轮询进度，界面不会一直卡住
-    const { data } = await uploadFile(raw, (p) => (uploadPercent.value = p))
+    const { data } = await uploadFiles(files, (p) => (uploadPercent.value = p))
     const jobId = data.job_id
     if (!jobId) {
       // 旧后端：同步返回结果
@@ -208,21 +223,26 @@ async function handleFileChange(uploadFileObj) {
       await loadFiles()
       return
     }
-    ingestLabel.value = `${data.filename} 入库中…`
     const started = Date.now()
     for (;;) {
       await new Promise((r) => setTimeout(r, 600))
       const { data: job } = await getUploadProgress(jobId)
+      const which = job.total_files > 1
+        ? `第 ${Math.min(job.done_files + 1, job.total_files)}/${job.total_files} 个`
+        : ''
       if (job.state === 'running') {
         uploadPercent.value = job.total
           ? Math.min(99, Math.round((job.processed / job.total) * 100))
           : 1
-        if (job.total) ingestLabel.value = `${job.filename} 入库中… ${job.processed}/${job.total} 片`
+        ingestLabel.value = job.total
+          ? `${which}${job.current}：${job.processed}/${job.total} 片`
+          : `${which}${job.current} 解析中…`
         continue
       }
       if (job.state === 'error') throw new Error(job.error || '入库失败')
       const sec = ((Date.now() - started) / 1000).toFixed(1)
-      ElMessage.success(`${job.filename} 入库 ${job.chunks} 片，用时 ${sec}s`)
+      const names = job.total_files > 1 ? `${job.total_files} 个文件` : job.filename
+      ElMessage.success(`${names} 入库 ${job.chunks} 片，用时 ${sec}s`)
       break
     }
     await loadFiles()

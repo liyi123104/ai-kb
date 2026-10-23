@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.request
 import uuid
 from html import escape
@@ -174,23 +175,44 @@ _UPLOAD_JOBS: dict[str, dict] = {}
 _UPLOAD_JOBS_LOCK = threading.Lock()
 
 
-def _run_ingest_job(job_id: str, target: Path, name: str) -> None:
-    """后台线程里跑入库，按批更新进度。"""
-    def on_progress(done: int, total: int) -> None:
-        with _UPLOAD_JOBS_LOCK:
-            job = _UPLOAD_JOBS.get(job_id)
-            if job is not None:
-                job.update(processed=done, total=total)
+def _run_ingest_job(job_id: str, files: list[dict]) -> None:
+    """后台线程里顺序入库多个文件，按批更新进度。"""
+    started = time.perf_counter()
+    total_chunks = 0
+    for index, item in enumerate(files, start=1):
+        name = item["name"]
 
-    try:
-        result = rag.ingest_file(target, progress=on_progress)
+        def on_progress(done: int, total: int, _name=name) -> None:
+            with _UPLOAD_JOBS_LOCK:
+                job = _UPLOAD_JOBS.get(job_id)
+                if job is not None:
+                    job.update(current=_name, processed=done, total=total)
+
         with _UPLOAD_JOBS_LOCK:
-            _UPLOAD_JOBS[job_id].update(state="done", chunks=result["chunks"],
-                                        seconds=result.get("seconds"),
-                                        chunks_per_sec=result.get("chunks_per_sec"))
-    except Exception as exc:  # noqa: BLE001 - 失败信息要回给前端
+            _UPLOAD_JOBS[job_id].update(current=name, processed=0, total=0)
+
+        try:
+            result = rag.ingest_file(settings.uploads_dir / name, progress=on_progress)
+        except Exception as exc:  # noqa: BLE001 - 失败信息要回给前端
+            with _UPLOAD_JOBS_LOCK:
+                _UPLOAD_JOBS[job_id].update(state="error", error=f"{name}：{exc}",
+                                            done_files=index - 1)
+            return
+
+        total_chunks += result["chunks"]
         with _UPLOAD_JOBS_LOCK:
-            _UPLOAD_JOBS[job_id].update(state="error", error=str(exc))
+            job = _UPLOAD_JOBS[job_id]
+            job["done_files"] = index
+            job["files"].append({"filename": name, "chunks": result["chunks"],
+                                 "seconds": result.get("seconds")})
+
+    elapsed = time.perf_counter() - started
+    with _UPLOAD_JOBS_LOCK:
+        _UPLOAD_JOBS[job_id].update(
+            state="done", chunks=total_chunks, seconds=round(elapsed, 1),
+            chunks_per_sec=round(total_chunks / elapsed, 1) if elapsed else 0,
+            processed=0, total=0,
+        )
 
 
 @app.get("/upload/progress/{job_id}")
@@ -204,49 +226,71 @@ def upload_progress(job_id: str) -> dict:
 
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...)) -> dict:
-    """接收文件 → 解析切片嵌入入库 → 返回文件名与切片数。"""
-    filename = Path(file.filename or "").name  # 防目录穿越
-    suffix = Path(filename).suffix.lower()
-    if suffix not in ALLOWED_SUFFIXES:
-        raise HTTPException(status_code=400,
-                            detail=f"不支持的文件类型：{suffix or '无扩展名'}（支持 pdf/docx/md/txt）")
+async def upload(file: list[UploadFile] = File(...)) -> dict:
+    """接收一个或多个文件 → 建一个后台任务顺序入库 → 立刻返回 job_id。
 
-    target = settings.uploads_dir / filename
-    size = 0
-    try:
-        with target.open("wb") as out:
-            while chunk := await file.read(1024 * 1024):
-                size += len(chunk)
-                if size > MAX_UPLOAD_MB * 1024 * 1024:
-                    out.close()
-                    target.unlink(missing_ok=True)
-                    raise HTTPException(status_code=413, detail=f"文件超过 {MAX_UPLOAD_MB}MB")
-                out.write(chunk)
-    except HTTPException:
-        raise
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"保存文件失败：{exc}") from exc
+    多文件合并成一个任务的好处：只在开头切一次模型（卸载聊天模型、加载 GPU 向量模型），
+    比逐个文件各切一次省很多时间。
+    """
+    accepted: list[dict] = []
+    for item in file:
+        filename = Path(item.filename or "").name  # 防目录穿越
+        suffix = Path(filename).suffix.lower()
+        if suffix not in ALLOWED_SUFFIXES:
+            raise HTTPException(status_code=400,
+                                detail=f"不支持的文件类型：{suffix or '无扩展名'}（支持 pdf/docx/md/txt）")
 
-    # 空文件 / 无文字层的扫描件在启动后台任务前就拒掉，否则用户要等到后台跑完才知道失败
-    try:
-        pages = rag.extract_pages(target)
-        has_text = any(p.get("text", "").strip() for p in pages)
-    except ValueError as exc:
-        target.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not has_text:
-        target.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=f"文件没有可提取的文本：{filename}")
+        target = settings.uploads_dir / filename
+        size = 0
+        try:
+            with target.open("wb") as out:
+                while chunk := await item.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_MB * 1024 * 1024:
+                        out.close()
+                        target.unlink(missing_ok=True)
+                        raise HTTPException(status_code=413, detail=f"文件超过 {MAX_UPLOAD_MB}MB")
+                    out.write(chunk)
+        except HTTPException:
+            raise
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"保存文件失败：{exc}") from exc
+
+        # 空文件 / 无文字层的扫描件在启动后台任务前就拒掉，否则用户要等到后台跑完才知道失败
+        try:
+            pages = rag.extract_pages(target)
+            has_text = any(p.get("text", "").strip() for p in pages)
+        except ValueError as exc:
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not has_text:
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=f"文件没有可提取的文本：{filename}")
+
+        accepted.append({"name": filename, "size": size})
 
     job_id = uuid.uuid4().hex[:12]
     with _UPLOAD_JOBS_LOCK:
-        _UPLOAD_JOBS[job_id] = {"job_id": job_id, "filename": filename, "size": size,
-                                "state": "running", "processed": 0, "total": 0,
-                                "chunks": 0, "seconds": None, "chunks_per_sec": None,
-                                "error": None}
-    threading.Thread(target=_run_ingest_job, args=(job_id, target, filename), daemon=True).start()
-    return {"job_id": job_id, "filename": filename, "size": size, "state": "running"}
+        _UPLOAD_JOBS[job_id] = {
+            "job_id": job_id,
+            "filename": accepted[0]["name"],      # 兼容单文件调用方
+            "filenames": [f["name"] for f in accepted],
+            "total_files": len(accepted),
+            "done_files": 0,
+            "current": accepted[0]["name"],
+            "files": [],
+            "state": "running",
+            "processed": 0,
+            "total": 0,
+            "chunks": 0,
+            "seconds": None,
+            "chunks_per_sec": None,
+            "error": None,
+        }
+    threading.Thread(target=_run_ingest_job, args=(job_id, accepted), daemon=True).start()
+    return {"job_id": job_id, "filenames": [f["name"] for f in accepted],
+            "count": len(accepted), "state": "running",
+            "filename": accepted[0]["name"]}
 
 
 @app.post("/chat")

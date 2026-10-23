@@ -53,6 +53,37 @@ def http(method: str, path: str, body=None, timeout: int = 300):
             return exc.code, dict(exc.headers or {}), raw
 
 
+def upload_files(items: list[tuple[str, bytes]]) -> tuple[int, dict]:
+    """一次提交多个文件（multipart 里重复用同一个字段名 file）。"""
+    boundary = "----test" + uuid_hex()
+    body = b""
+    for filename, content in items:
+        body += (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n"
+        ).encode() + content + b"\r\n"
+    body += f"--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        BASE + "/upload", data=body, method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            status, data = resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read())
+        except Exception:  # noqa: BLE001
+            return exc.code, {}
+    if data.get("job_id"):
+        job = wait_upload(data["job_id"])
+        if job.get("state") == "error":
+            return 500, {"detail": job.get("error")}
+        data = {**data, "chunks": job.get("chunks", 0), "state": job.get("state")}
+    return status, data
+
+
 def wait_upload(job_id: str, timeout: int = 900) -> dict:
     """上传已改为后台任务：轮询到完成。"""
     deadline = time.time() + timeout
@@ -191,13 +222,18 @@ def t05():
     return f"{len(body)} 个文件"
 
 
-@case("A6 上传 md 文件成功且切片数 >= 1")
+@case("A6 一次上传多个文件成功且切片数 >= 1")
 def t06():
-    st, body = upload("t-upload.md", ("# 测试\n\n这是自动化测试上传的文件，主题是 RAG 检索增强生成。" * 20).encode())
+    # 2026-10-23 起支持一次提交多个文件（后端放进同一个入库任务顺序处理）
+    st, body = upload_files([
+        ("t-multi-a.md", ("# 多文件 A\n\n用于验证一次上传多个文件的第一个文件，主题 RAG。" * 12).encode()),
+        ("t-multi-b.md", ("# 多文件 B\n\n第二个文件，验证顺序入库与进度汇总。" * 12).encode()),
+    ])
     check(st == 200, f"状态码 {st} {body}")
-    check(body.get("chunks", 0) >= 1, "切片数为 0")
-    http("DELETE", "/files/t-upload.md")
-    return f"chunks={body['chunks']}"
+    check(body.get("chunks", 0) >= 2, f"切片数异常：{body.get('chunks')}")
+    http("DELETE", "/files/t-multi-a.md")
+    http("DELETE", "/files/t-multi-b.md")
+    return f"2 个文件共 {body['chunks']} 片"
 
 
 @case("A7 上传 exe 被拒绝（400）")
