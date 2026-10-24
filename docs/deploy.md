@@ -47,8 +47,8 @@
 ### A-2 打两个隧道
 
 ```powershell
-# 后端（8010）—— 注意用 http 隧道
-cpolar http 8010
+# 后端（8000）—— 注意用 http 隧道
+cpolar http 8000
 # 前端（5173）
 cpolar http 5173
 ```
@@ -56,13 +56,13 @@ cpolar http 5173
 或用 ngrok：
 
 ```powershell
-ngrok http 8010
+ngrok http 8000
 ngrok http 5173
 ```
 
 ### A-3 前端要指向公网后端
 
-当前前端用 Vite 代理 `/api` → 本机 8010，公网访问时这条代理不生效，需要改一处：
+当前前端用 Vite 代理 `/api` → 本机 8000，公网访问时这条代理不生效，需要改一处：
 
 ```bash
 # web/.env.production 新建，写后端公网地址

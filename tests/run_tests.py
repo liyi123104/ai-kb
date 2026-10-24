@@ -31,7 +31,7 @@ def _default_base() -> str:
         host = "127.0.0.1" if settings.host in ("0.0.0.0", "127.0.0.1") else settings.host
         return f"http://{host}:{settings.port}"
     except Exception:  # noqa: BLE001
-        return "http://127.0.0.1:8010"
+        return "http://127.0.0.1:8000"
 
 
 BASE = _default_base()
