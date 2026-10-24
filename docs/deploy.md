@@ -30,7 +30,7 @@
 
 1. 本机能跑通：后端 `python -m app.main`、前端 `cd web; npm run dev`；
 2. Ollama 在跑，模型 `bge-m3`、`qwen2.5:7b` 已拉取；
-3. 项目根目录 `D:\ai-kb`，`.env` 已按 `.env.example` 配好。
+3. 项目根目录（下文以 `<项目目录>` 代指），`.env` 已按 `.env.example` 配好。
 
 ---
 

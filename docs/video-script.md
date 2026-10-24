@@ -9,7 +9,7 @@
 ## 录制前准备（10 分钟）
 
 ```powershell
-cd D:\ai-kb
+cd <项目目录>
 
 # 1) 确认模型在跑
 ollama list
@@ -19,7 +19,7 @@ ollama list
 
 # 3) 起前端（窗口 B）
 #    装了 node_modules 就用 Vue 界面；没装就用 Streamlit 顶
-cd D:\ai-kb\web; npm run dev            # http://localhost:5173
+cd <项目目录>\web; npm run dev            # http://localhost:5173
 # 或
 .\.venv\Scripts\python.exe -m streamlit run ui_streamlit.py   # http://localhost:8501
 ```

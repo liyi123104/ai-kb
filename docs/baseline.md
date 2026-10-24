@@ -100,7 +100,7 @@
 ## 7. 复现命令
 
 ```powershell
-cd D:\ai-kb
+cd ai-kb
 # 生成/更新测试集（已人工核对，脚本可复现）
 .\.venv\Scripts\python.exe scripts\06a_write_testset.py
 # 跑评测（约 6 分钟）

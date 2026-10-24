@@ -1,347 +1,183 @@
-# AI 学习资料知识库（ai-kb）
+# AI 学习资料知识库
 
-把 AI 学习资料灌进向量库，提问后返回**带出处**的答案（文件名 + PDF 页码）。
+> 把 PDF / Word 学习资料变成可以追问的私人助教：**答案必须带出处，出处能一键翻到原书那一页并高亮。**
 
-- 单用户、无账号体系；支持 PDF / Word / Markdown / TXT
-- 答案逐字流式输出，附「文件 + 页码 + 命中片段 + 相似度」
-- 自建 30 题测试集评测：**检索召回率 90.0%**、**答案准确率 76.7%**
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.11x-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Vue](https://img.shields.io/badge/Vue-3-42B883?logo=vue.js&logoColor=white)](https://vuejs.org/)
+[![LangChain](https://img.shields.io/badge/LangChain-RAG-1C3C3C)](https://www.langchain.com/)
+[![ChromaDB](https://img.shields.io/badge/ChromaDB-vector%20store-FF6B6B)](https://www.trychroma.com/)
+[![Ollama](https://img.shields.io/badge/Ollama-qwen2.5%20%7C%20bge--m3-000000)](https://ollama.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-> 详细计划与进度见 [`docs/AI学习资料知识库-项目计划书.docx`](docs/AI学习资料知识库-项目计划书.docx)（v1.3）；
-> 基线数据见 [`docs/baseline.md`](docs/baseline.md)。
+![问答与出处](docs/screenshots/resume/02-answer.png)
 
-## 界面
+---
 
-![首页](docs/screenshots/ui-home.png)
+## 它解决什么问题
 
-![问答与出处](docs/screenshots/ui-answer.png)
+用通用助手问专业知识，最难受的两件事：**不知道答案从哪来**、**想核对时找不到原书哪一页**。
 
-点开 DOCX 时的阅读视图（后端转 HTML，不弹下载）：
+这个项目把 10 份 AI 教材和论文（《动手学深度学习》《语音与语言处理》《Attention Is All You Need》等）
+切成 10,942 个片段存进向量库，回答问题时：
 
-![DOCX 阅读视图](docs/screenshots/ui-docx-view.png)
+1. 先检索最相关的 5 个片段，过滤代码块、目录行等低价值碎片；
+2. 只把其中 2 条塞给本地模型，控制上下文长度与延迟；
+3. 答案里带 `[1]` 引用编号，下方列出**文件名 + 页码 + 相似度**；
+4. 点开出处，后端在该页定位命中句、打黄色标注，直接跳到那一页；
+5. 资料里确实没有的内容，明确说「资料中没有相关内容」，不编。
 
-左侧是已入库资料（片数、大小、删除），右侧问答区给出答案与**出处卡片**（文件名 + PDF 页码 + 相似度 + 命中片段）。
+![出处高亮](docs/screenshots/resume/07-pdf-highlight.png)
 
-每条出处展示四项信息：**文件名 · 页码 · 相似度 · 命中原文片段**。
-片段不是机械截取前 100 字（那样会从单词中间断开），而是按句子切分后
-用「与问题的字面重叠」挑出最相关的一句，并过滤掉代码行；超长在词边界截断加省略号。
+## 功能
 
-![出处片段](docs/screenshots/ui-sources-snippet.png)
-
-**出处可以点开并高亮命中位置**：点任意一条出处，后端用 PyMuPDF 在该页搜索命中片段、
-逐句按与问题的相关度排序，给最相关的句子加**黄色高亮**，再把整份 PDF 交给浏览器打开并跳到该页
-（URL 形如 `/api/files/d2l-zh.pdf/highlight?page=434&q=...&question=...#page=434`）。
-
-![PDF 高亮](docs/screenshots/pdf-highlight.png)
-DOCX 浏览器渲染不了，由后端转成网页直接阅读（见截图）。
+| 模块 | 能力 |
+|---|---|
+| 入库 | PDF / DOCX / MD / TXT；多文件一次提交，后台任务 + 实时进度；单文件 100 MB 上限；空文件与不支持的类型在提交时即拒绝 |
+| 检索 | bge-m3（1024 维）向量化，切片 512 / 重叠 50，Top-5 召回，过滤低价值碎片 |
+| 回答 | 本地 `qwen2.5:7b` 或云端 `deepseek-chat` 可切换；流式输出（首字约 2.3 秒）；答案带引用编号 |
+| 出处 | 文件名 + 页码（跨页给范围）+ 相似度 + 命中句；PDF 跳页高亮，DOCX 转网页阅读 |
+| 会话 | 按会话 ID 存取历史，刷新不丢 |
+| 安全 | 可选访问令牌（登录一次下发 7 天会话 Cookie）、按 IP 限流、路径穿越防护、容器内语料只读挂载 |
+| 运维 | 日志落文件并轮转、上传任务落库（重启可查）、数据一键备份、Docker 一键启动 |
 
 ## 架构
 
-```text
-            ┌──────────────────────────────┐
- 浏览器 ──▶ │ Vue3 + Element Plus (web/)   │  Vite 开发 / Nginx 托管
-            └───────────────┬──────────────┘
-                     /api 代理（SSE 不缓冲）
-            ┌───────────────▼──────────────┐
-            │ FastAPI（app/main.py）        │  /upload /chat /chat/stream /files
-            ├──────────────────────────────┤
-            │ RAG 核心（app/rag.py）        │  解析→切片→检索→拼 prompt→生成
-            ├──────────────┬───────────────┤
-            │ ChromaDB      │ SQLite        │  向量库 data/chroma · 会话 data/app.db
-            │ (bge-m3)      │ (历史)        │
-            └──────────────┴───────┬───────┘
-                                    │ HTTP
-                          ┌─────────▼─────────┐
-                          │ Ollama（宿主机）    │  bge-m3（向量）+ qwen2.5:7b（生成）
-                          └───────────────────┘
+```
+┌──────────────┐   /api（Vite 代理 / Nginx 反代）
+│  Vue3 + Vite │ ──────────────────────────────┐
+│ Element Plus │                               │
+└──────────────┘                               ▼
+                                    ┌──────────────────────┐
+                                    │   FastAPI (uvicorn)  │
+                                    │  16 个 REST + SSE     │
+                                    └───────────┬──────────┘
+                    ┌───────────────────────────┼───────────────────────┐
+                    ▼                           ▼                       ▼
+          ┌──────────────────┐       ┌────────────────────┐   ┌──────────────────┐
+          │ LangChain 检索链  │       │ Ollama / DeepSeek  │   │ SQLite           │
+          │ 切片→向量→Top-5   │       │ qwen2.5:7b 生成     │   │ 会话与上传任务     │
+          └────────┬─────────┘       │ bge-m3 向量化       │   └──────────────────┘
+                   ▼                 └────────────────────┘
+          ┌──────────────────┐
+          │  ChromaDB 持久库  │  ai-kb-ai（AI 资料）/ ai-kb-ref（通用技术参考）
+          └──────────────────┘
 ```
 
-模型层可切换：`LLM_PROVIDER=ollama`（本地免费）或 `deepseek`（云端，需 API Key），
-业务代码不硬编码模型名，见 `app/llm.py`。
+## 技术栈
 
-## 快速开始（本地）
-
-### 方式一：双击启动（推荐）
-
-双击项目根目录的 **`start.bat`** —— 它会依次检查 Ollama、启动后端、启动前端，全部就绪后自动打开浏览器。
-关闭服务双击 **`stop.bat`**（Ollama 保持运行，下次更快）。
-
-### 端口说明
-
-本项目的后端默认跑在 **8000**（`.env` 的 `APP_PORT`），前端 5173 的 `/api` 代理指向 8000。
-之所以不用 8000，是因为它常被本机其他项目占用 —— 一旦被占，前端代理会打到别人的后端上，
-表现为莫名其妙的 404 / 500。改端口只需同时改 `.env` 的 `APP_PORT` 与 `web/vite.config.js` 的代理目标。
-
-### 方式二：手动起三条命令
-
-```powershell
-# 1) 依赖
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-
-# 2) 配置（按需改 .env：模型名、端口、闸门阈值）
-Copy-Item .env.example .env
-
-# 3) 起服务
-.\.venv\Scripts\python.exe -m app.main          # http://127.0.0.1:8000/docs
-.\.venv\Scripts\python.exe -m streamlit run ui_streamlit.py   # 临时界面 http://localhost:8501
-
-# 4) 产品界面（Vue3）
-cd web; npm install --registry=https://registry.npmmirror.com; npm run dev   # http://127.0.0.1:5173
-```
-
-前置条件：本机装好 [Ollama](https://ollama.com/) 并拉取模型：
-
-```powershell
-ollama pull bge-m3
-ollama pull qwen2.5:7b
-```
-
-首次使用需要把资料入库（把 PDF 放进 `materials/`）：
-
-```powershell
-.\.venv\Scripts\python.exe scripts\04_store.py --all    # 全量入库（约 8,900 片，视机器 40-60 分钟）
-```
-
-## Docker（可选）
-
-```powershell
-docker compose up -d --build      # 前端 http://localhost  后端 http://localhost:8000
-docker compose logs -f backend    # 看日志
-docker compose down               # 停止
-```
-
-**实测结果（本机 Docker Desktop 29.9.2）**
-
-| 项 | 结果 |
-|---|---|
-| 后端镜像 | 1.29 GB，容器状态 healthy |
-| 前端镜像 | Nginx 托管，80 端口返回 200 |
-| 向量库 | 挂载 `./data`，容器内读到 8,895 条；重启容器后仍在 |
-| 接口 | 经 Nginx 反代上传 / 问答 / 流式 / 删除全部通过 |
-| PDF 高亮 | 容器内 PyMuPDF 正常（8 个注释，1.2s） |
-
-**两个必需的处理**
-
-1. **国内拉不到 Docker Hub**：基础镜像可用镜像站覆盖
-
-   ```powershell
-   $env:BASE_IMAGE="docker.m.daocloud.io/library/python:3.12-slim"
-   $env:NODE_IMAGE="docker.m.daocloud.io/library/node:24-alpine"
-   $env:NGINX_IMAGE="docker.m.daocloud.io/library/nginx:1.27-alpine"
-   docker compose build
-   ```
-
-2. **镜像依赖做了精简**（`requirements-docker.txt`）：去掉 torch / sentence-transformers /
-   transformers / streamlit 及其依赖。原因：embedding 走 Ollama，代码里没有任何相关 import，
-   而 `sentence-transformers` 会强制拉 554 MB 的 torch。镜像因此从预计 4 GB+ 降到 1.29 GB。
-
-**已知差异**：容器内问答约 13–22 秒，比本机（3–5 秒）慢 2–4 倍。检索只占 0.24 秒，
-慢在生成——Docker Desktop 的 WSL2 虚拟机会和宿主机抢 CPU。真实 Linux 服务器上不会有这个问题。
-
-## 配置（`.env`）
-
-| 键 | 默认 | 说明 |
+| 层 | 选型 | 为什么 |
 |---|---|---|
-| `LLM_PROVIDER` | `ollama` | `ollama` 或 `deepseek` |
-| `OLLAMA_MODEL` | `qwen2.5:7b` | 生成模型 |
-| `OLLAMA_EMBED_MODEL` | `bge-m3:latest` | 向量模型（1024 维） |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 地址 |
-| `DEEPSEEK_API_KEY` | 空 | 切云端时才需要 |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | 512 / 50 | 切片参数 |
-| `TOP_K` | 5 | 检索条数 |
-| `RAG_SCORE_GATE` | 0.45 | 最佳相似度低于此值直接答「资料中没有相关内容」 |
-| `APP_PORT` | 8000 | 服务端口（避开常被其他项目占用的 8000） |
+| 后端 | FastAPI + Pydantic + Uvicorn | 原生异步，SSE 流式简单，自带接口文档 |
+| 前端 | Vue3 + Vite + Element Plus + axios | 组合式 API 上手快，组件库省掉造轮子 |
+| 检索 | LangChain + ChromaDB | 切片、向量化、相似度检索一条链；Chroma 持久化零运维 |
+| 模型 | Ollama（qwen2.5:7b、bge-m3）+ DeepSeek API | 本地免费可离线；云端保底，效果更好 |
+| 存储 | SQLite | 单机场景够用，零部署成本 |
+| 交付 | Docker + docker-compose + Nginx | 一条命令起全套 |
 
-`.env` 不进 Git，模板见 `.env.example`。
+## 快速开始
 
-## 接口
+### 前置
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/health` | 健康检查（返回库里条数与当前模型） |
-| POST | `/upload` | 上传文件 → 解析/切片/嵌入/入库，返回 `filename/chunks/size` |
-| POST | `/chat` | 问答，返回 `answer/sources/session_id` |
-| POST | `/chat/stream` | SSE 流式：`sources → token… → done` |
-| GET | `/files` | 已入库文件（文件名、大小、切片数） |
-| DELETE | `/files/{name}` | 删除文件及其向量 |
-| GET | `/sessions/{id}` | 按会话 ID 取回历史 |
-| GET | `/providers` | 可选模型列表（供界面下拉框） |
-| GET | `/files/{name}/raw` | PDF/MD/TXT 内嵌打开（PDF 支持 `#page=N` 跳页） |
-| GET | `/files/{name}/view` | DOCX 转成 HTML 页面，浏览器内直接阅读（不下载） |
-| GET | `/files/{name}/highlight` | PDF 在命中句子处打黄色高亮后返回（`page`/`q`/`question`） |
+- Docker Desktop（或本地 Python 3.12 + Node 18+）
+- [Ollama](https://ollama.com/download)，并拉模型：
 
-## 换设备 / 迁移
-
-**会自动连接新设备的本地模型，但不会自动"发现"模型名。** 具体：
-
-| 项 | 行为 |
-|---|---|
-| Ollama 地址 | `.env` 里 `OLLAMA_BASE_URL=http://127.0.0.1:11434`，指本机 → 换设备自动跟随 |
-| 生成模型 | `.env` 里的只是**默认值**；界面上会自动列出本机所有已下载模型供选择，换设备后无需改配置 |
-| 向量模型 | 写死在 `.env`（`bge-m3:latest`）—— 换它会破坏 1024 维索引，因此不给选 |
-| 项目路径 | 全部相对项目根（`config.py` 用 `Path(__file__).parent.parent`）→ 换盘符/目录都不用改 |
-| 向量库 | 与 `bge-m3` 的 1024 维绑定 → **换 embedding 模型必须重建索引**；只换设备沿用同一模型则无影响 |
-
-迁移步骤：
-
-```powershell
-# 1) 新设备装 Ollama 并拉模型
+```bash
 ollama pull qwen2.5:7b
 ollama pull bge-m3
-
-# 2) 拷项目（用完整包可连向量库和语料一起带走）
-# 3) 一键自检，缺什么它会直接告诉你
-.venv\Scripts\python.exe scripts\check_env.py
 ```
 
-`start.bat` 启动前会自动跑这个自检；不通过会列明补法（例如 `ollama pull xxx`）并询问是否继续。
+### 方式一：Docker（推荐）
 
-## 打包分发
-
-```powershell
-.venv\Scripts\python.exe scripts\package.py
+```bash
+cp .env.example .env      # 按需改 AUTH_TOKEN / LLM_PROVIDER 等
+docker compose up -d --build
 ```
 
-产物在 `dist/ai-kb-src-YYYYMMDD.zip`（约 0.7 MB、59 个文件）。
-包含：代码、脚本、前端源码、文档、测试集与评测结果、启动脚本、`.env.example`。
-**不含**：`.venv`、`node_modules`、向量库、语料、上传文件、`.env`
-（脚本内置检查，发现 `.env` 会直接拒绝打包）。
+打开 <http://localhost>。首次启动会预热模型，约 30 秒。
 
-要「解压即用」（含 8,895 条向量库与 10 份语料）就打完整包：
+### 方式二：本地开发
 
-```powershell
-.venv\Scripts\python.exe scripts\package.py --full
+```bash
+python -m venv .venv && .venv\Scripts\activate     # Windows
+pip install -r requirements.txt
+copy .env.example .env
+
+.venv\Scripts\python.exe -m app.main               # 后端 http://127.0.0.1:8000
+
+cd web && npm install && npm run dev               # 前端 http://127.0.0.1:5173
 ```
 
-产物 `dist/ai-kb-full-YYYYMMDD.zip`（约 378 MB）。解压后只需装依赖即可直接启动，
-不用重新入库（省约 48 分钟）；注意语料有版权，适合自己备份/迁移，不宜公开分发。
-
-拿到包的人解压后按「快速开始」重建环境即可。
-
-## 项目结构
-
-```text
-app/            config.py 配置 · llm.py 模型抽象 · rag.py RAG 核心 · db.py 历史 · main.py 路由
-scripts/        01 提取 · 02 切片 · 03 向量验证 · 04 入库 · 05 命令行 RAG · 06 测试集 · evaluate.py 评测
-web/            Vue3 前端（src/views/Chat.vue 主界面）
-materials/      10 份 AI 学习资料 PDF（不进 Git）
-data/           chroma/ 向量库 · app.db 历史 · uploads/ 上传文件 · testset.csv 测试集
-docs/           计划书、基线、环境记录
-```
-
-## 自动化测试
-
-```powershell
-.venv\Scripts\python.exe tests\run_tests.py
-```
-
-30 个用例，分四组（脚本自己拉起后端，跑完自动关闭）：
-
-| 组 | 内容 |
-|---|---|
-| A 接口契约（10） | health / providers / files / upload / delete 的返回结构与错误码 |
-| B 安全与边界（6） | 路径穿越、未知文件、空问题、超长问题、docx 阅读视图、PDF 高亮 |
-| C 问答与流式（6） | 答案与出处、无关问题拒答、会话落库、SSE 事件顺序、指定模型 |
-| D 纯函数与数据（8） | clean_answer、best_snippet、page_label、测试集与评测结果一致性 |
-
-当前结果：**30/30 通过**（约 70 秒）。
-
-### 入库性能（2026-10-23 优化）
-
-上传后的「解析 → 切片 → 向量化 → 入库」做过两处优化，实测：
-
-| 场景 | 优化前 | 优化后 | 提升 |
-|---|---|---|---|
-| 向量化速率 | 3.4 片/秒（CPU） | **45–55 片/秒（GPU）** | 约 13–16 倍 |
-| 148 片 PDF 上传 | 约 45 秒 | **6.3 秒** | 约 7 倍 |
-| 813 页 / 1791 片 PDF | 约 9.5 分钟 | **约 45 秒** | 约 13 倍 |
-| 解析（813 页） | 42.5 秒（pypdf） | **1.4 秒（PyMuPDF）** | 约 30 倍 |
-
-做法：
-1. **入库时把向量模型放 GPU**：入库不需要生成模型，先卸载聊天模型腾出显存，
-   再用 `num_gpu=-1` 加载 bge-m3，完成后把显存还给生成模型（`INGEST_USE_GPU=1`）。
-2. **PDF 改用 PyMuPDF 解析**：字数与 pypdf 差 0.7%，召回率同为 90.0%（`PDF_EXTRACTOR=fitz`，
-   出问题自动退回 pypdf）。
-
-**支持一次上传多个文件**：界面支持多选与多文件拖拽，前端攒 400ms 后合并成一个请求；
-后端把这批文件放进**同一个入库任务**顺序处理——只在开头切一次模型，后面的文件复用已经
-加载到 GPU 的向量模型，明显更快（实测 3 个文件：第一个 148 片 50.5 秒，第二个 122 片只要 6.0 秒）。
-
-**上传是异步的，界面有实时进度**：POST /upload 只负责收下文件并返回 job_id，
-入库在后台线程里跑；前端每 600ms 查 /upload/progress/{job_id}，显示
-「第 2/3 个 xxx.pdf：64/148 片」。空文件与无文字层的扫描件会在启动后台任务前同步返回 400。
-
-接口：
-- `POST /upload`：multipart 里重复使用字段名 `file` 即可带多个文件
-  → `{job_id, filenames[], count, state}`
-- `GET /upload/progress/{job_id}` → `{state, current, processed, total, done_files,
-  total_files, files[], chunks, seconds, chunks_per_sec}`
-
-**为什么有时仍然慢**：入库需要把 bge-m3 独占在 GPU 上。如果同一台机器上还有别的程序在调
-Ollama（比如另开一个项目），它的模型会把 bge-m3 挤出显存，速率会从 45 片/秒掉到 2–20 片/秒。
-实测遇到两次：一次是另一个项目占着 8000 端口并持续问模型，一次是同时在下轮子。
-处理办法：入库时先关掉其他占用 Ollama 的程序；界面上的进度条能直接看出当前速率。
-
-## 安全与运维
-
-**登录一次即可（公网必备）**：在 `.env` 里设置 `AUTH_TOKEN=你的口令`。
-之后打开界面会弹一次登录框，输入口令 → 后端下发 7 天有效的会话 Cookie，**后续问答、上传、
-打开 PDF 都不再需要令牌**。接口层面仍兼容两种方式：
-
-- 会话 Cookie（浏览器自动携带，推荐）
-- 请求头 `X-Auth-Token` 或链接参数 `?token=`（给 curl / 脚本 / 分享链接用）
-
-想免手输可以用一次性登录链接：`http://127.0.0.1:5173/?token=<AUTH_TOKEN>`
-（登录后地址栏会自动去掉参数）。页面右下角有「退出登录」。
-未设置 `AUTH_TOKEN` 时不启用鉴权，适合本机自用。
-
-**日志**：写入 `data/app.log`（5MB 轮转、保留 3 份），同时输出到控制台；不再用 print。
-
-**停止生成**：对话进行中发送按钮会变成「停止」，点了立即中断（AbortController）。
-
-**多次采样评测**：30 题里每题值 3.3 个百分点，单次结果噪声很大，建议
-`.venv\Scripts\python.exe scripts\evaluate_repeat.py 3` 跑 3 次看均值与极差。
-
-**按领域分库**：`scripts/split_library.py --dry-run` 先看计划，`--apply` 把向量复制成
-`ai-kb-ai`（只含 AI 资料）与 `ai-kb-ref`（PostgreSQL/Adobe/Docker 等通用参考），原库保留。
-把 `.env` 的 `CHROMA_COLLECTION` 改成 `ai-kb-ai` 即只检索 AI 资料——实测检索从 0.92 秒降到
-0.31 秒，召回与准确率不变。
+把资料放进 `materials/`，在界面左上角拖进去即可入库。
 
 ## 评测
 
-```powershell
-.\.venv\Scripts\python.exe scripts\evaluate.py
+30 道题、每题标注期望出处（文件 + 页码），自动判分：
+
+| 指标 | 结果 |
+|---|---|
+| 检索召回率（Top-5 命中期望页） | **90.0%**（27/30） |
+| 答案准确率（覆盖度 + 模型双判） | **73.3%**（22/30） |
+| 无关问题拒答 | **5/5** |
+| 检索耗时（AI 专用库） | **0.31 s** |
+| 问答热态整轮 | 5.7–6.2 s |
+| 流式首字 | **2.34 s** |
+| 入库速度 | 45–55 片段/秒（GPU） |
+| 功能用例 | **30 / 30** |
+
+复现：
+
+```bash
+.venv\Scripts\python.exe scripts\evaluate.py        # 30 题评测，输出 data/eval-results.csv
+.venv\Scripts\python.exe tests\run_tests.py         # 30 个功能用例
 ```
 
-30 题覆盖 10 份资料，指标定义与错题分析见 `docs/baseline.md`。当前基线：
+做了 8 组对照实验（切片长度、重叠比例、上下文条数、本地 vs 云端、拒答提示词、PDF 解析器、重排），
+**包括一组失败的实验**：用 7B 模型做列表式重排，Top-1 从 19 降到 13、检索慢 5 倍，结论是不采用。
+数据在 [docs/experiments.md](docs/experiments.md)。
 
-| 指标 | 目标 | 实测 |
-|---|---|---|
-| 检索召回率 | ≥ 80% | **90.0%** |
-| 答案准确率 | ≥ 70% | **76.7%** |
-| 首字延迟 / 完整耗时 | ≤ 3s / ≤ 15s | **1.2s / 均值 3.6s** |
-| 云端对照（deepseek-chat） | — | 召回 90.0% · 准确 **86.7%** · 1.1s |
+## 目录结构
 
-## 几个值得说的技术点
+```
+app/                 后端：main（路由）/ rag（检索与生成）/ llm（模型封装）/ db（SQLite）/ config
+web/                 前端：Vue3 + Vite，src/api.js 统一封装请求与 SSE 解析
+scripts/             评测、实验、打包、备份、录屏等工具
+tests/run_tests.py   30 个功能用例（入库、检索、问答、流式、拒答、出处）
+docs/                计划书、技术栈、技术点详解、实验记录、基线、部署、评估报告
+data/                运行期数据（向量库、SQLite、上传文件）——不入库
+materials/           原始语料 PDF——不入库
+```
 
-1. **切片的 50 字重叠是补出来的**：LangChain 的 `chunk_overlap` 按切分单元整块回退，
-   PDF 长行会让重叠变成 0。本项目切完后再做边界补齐，保证「≤512 字且相邻重叠 ≥50」。
-2. **「资料中没有」用双保险**：相似度闸门（0.45）+ prompt 约束。单纯靠阈值不可靠 ——
-   实测无关文本对的余弦也能到 0.35。
-3. **bge-m3 的 NaN 兜底**：Ollama 版模型对个别 token 会返回 500，已在 Embedding 层加
-   降级重试，避免一句坏输入让整次检索失败。
-4. **出处不撒谎**：跨页切片同时记录 `page_start/page_end`，回答里写 `p.434–435`；
-   d2l-zh 的印刷页码 = 物理页 − 18，文档如实标注是 PDF 物理页。
+## 关键设计取舍
 
-## 当前进度
-
-- ✅ M0 环境 · M1 命令行 RAG · M2 后端 API · M3 前端（Vue3 可跑，代理/SSE 已验） · M4 测试集与基线
-- 🟡 M5 交付：Docker 文件就绪但本机无 Docker、演示视频待录
-- 🟡 M6 加分：A/B 实验 E1/E4 已出数据；E2/E3 需额外拉模型；云部署待定方案
-- ⚠️ 首字延迟未达 ≤3s：6GB 显存跑本地 7B 模型，实测热态 3.5–6s，详见 `docs/baseline.md` 第 8 节
+- **切片 512 / 重叠 50**：256 太碎、1024 太糊，这是实验跑出来的。
+- **只喂 2 条上下文**：3 条时模型被噪声带偏，延迟从 6.2 秒涨到 8 秒。
+- **自写 Ollama 客户端**：LangChain 的 `OllamaEmbeddings` 会丢掉 `keep_alive`，
+  导致每次请求重载模型（多等约 2 秒），换掉后解决。
+- **高亮不缓存「未命中」结果**：早期把没找到句子的 PDF 也缓存了，后续永远不重新高亮。
+- **上传改后台任务**：大文件同步入库会把请求卡住十分钟，改成任务 + 轮询进度。
+- **重排实验失败就关掉**：指标全面变差，代码留在开关后面，默认关闭。
 
 ## 已知限制
 
-- 单用户设计，无鉴权（计划书明确不做用户系统）
-- 目录页/参考文献页仍会进入向量库（检索侧已过滤大部分）
-- 本地 7B 模型在长答案上偶有细节偏差，基线文档里逐条记录了错题
+- 单用户设计，没有多租户与配额；公网部署前请设 `AUTH_TOKEN` 并套 HTTPS（见 [docs/deploy.md](docs/deploy.md)）。
+- 容器内生成比宿主机慢 2–4 倍（Docker Desktop 的 WSL2 限制，Linux 上不明显）。
+- 6 GB 显存下向量模型与生成模型不能舒服地同时驻留，入库时会临时卸载对话模型。
+- 页码高亮依赖文本匹配，扫描版 PDF（无文字层）无法定位。
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [docs/技术栈说明.docx](docs/技术栈说明.docx) | 每个技术点的作用与选型理由 |
+| [docs/技术点详解.docx](docs/技术点详解.docx) | 24 个技术细节的深入讲解 |
+| [docs/experiments.md](docs/experiments.md) | 8 组对照实验数据（含失败结论） |
+| [docs/baseline.md](docs/baseline.md) | 基线指标与错题分析 |
+| [docs/acceptance.md](docs/acceptance.md) | 30 个任务的验收证据 |
+| [docs/deploy.md](docs/deploy.md) | 内网穿透 / 云服务器两套部署方案 |
+| [docs/项目评估报告-v2.docx](docs/项目评估报告-v2.docx) | 复评报告（含剩余风险） |
+| [docs/demo-video.mp4](docs/demo-video.mp4) | 99 秒演示（真实界面录制） |
+
+## License
+
+[MIT](LICENSE)

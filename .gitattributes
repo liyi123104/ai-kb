@@ -1,23 +1,23 @@
-# 换行符与二进制文件的统一策略
-# 目的：无论谁在哪台机器上提交，文本文件入库一律是 LF，避免出现"整个文件被修改"的假 diff。
-# 注意：本文件的规则优先于 git config 的 core.autocrlf 设置。
-
-# 默认：文本文件自动识别，工作区与库内都统一为 LF
+# 统一用 LF 存储，检出时按平台处理
 * text=auto eol=lf
 
-# Windows 专属脚本必须保留 CRLF，否则 cmd / PowerShell 可能解析异常
-*.bat text eol=crlf
-*.cmd text eol=crlf
-*.ps1 text eol=crlf
-
-# 二进制文件：禁止任何换行转换与文本合并
+# 二进制文件不要做行尾转换
+*.png  binary
+*.jpg  binary
+*.jpeg binary
 *.pdf  binary
 *.docx binary
 *.xlsx binary
 *.pptx binary
-*.db   binary
-*.png  binary
-*.jpg  binary
-*.jpeg binary
-*.gif  binary
-*.ico  binary
+*.mp4  binary
+*.zip  binary
+
+# 文档与配置按文本处理
+*.md   text eol=lf
+*.py   text eol=lf
+*.js   text eol=lf
+*.vue  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
