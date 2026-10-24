@@ -1,10 +1,9 @@
-"""T3.1 Streamlit 临时界面：上传资料 + 提问 + 出处展示（调用已完成的 FastAPI 后端）。
+"""早期原型：Streamlit 版界面（上传资料 → 提问 → 看出处）。
 
-这是阶段 A 的临时脚手架，只验证「上传 → 提问 → 看到出处」这条链路；
-第 4-5 周会被 Vue3 产品界面替换（计划书第 2 节）。
+产品界面后来换成了 Vue3（见 web/），这个文件只作为演进过程留档，
+功能与后端接口保持兼容，仍可单独启动：
 
-启动：
-    .\\.venv\\Scripts\\python.exe -m streamlit run ui_streamlit.py
+    python -m streamlit run legacy/streamlit_prototype.py
 """
 import requests
 import streamlit as st
