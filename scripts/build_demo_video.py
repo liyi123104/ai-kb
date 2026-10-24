@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 FRAMES_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "data" / "demo-frames"
-OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "docs" / "demo-video.mp4"
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "data" / "demo-video.mp4"
 
 W, H = 1440, 900
 FPS = 12

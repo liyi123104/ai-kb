@@ -176,7 +176,6 @@ materials/           原始语料 PDF——不入库
 | [docs/acceptance.md](docs/acceptance.md) | 30 个任务的验收证据 |
 | [docs/deploy.md](docs/deploy.md) | 内网穿透 / 云服务器两套部署方案 |
 | [docs/项目评估报告-v2.docx](docs/项目评估报告-v2.docx) | 复评报告（含剩余风险） |
-| [docs/demo-video.mp4](docs/demo-video.mp4) | 99 秒演示（真实界面录制） |
 
 ## License
 
