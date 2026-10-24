@@ -58,3 +58,7 @@ dist/
 
 # 数据备份（scripts/backup_data.py 生成，体积大）
 backups/
+
+# 演示视频录制中间产物
+data/demo-frames/
+data/edge-*/

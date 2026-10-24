@@ -70,7 +70,8 @@
 | `docs/baseline.md` | 基线指标与错题分析 |
 | `docs/experiments.md` | E1–E8 实验（含 E2 负面结论） |
 | `docs/deploy.md` | 内网穿透 / 云服务器两套方案 |
-| `docs/video-script.md` | 3 分钟演示脚本 |
+| `docs/demo-video.mp4` | 演示视频（99 秒，自动录制合成，2.2 MB） |
+| `docs/video-script.md` | 3 分钟演示脚本（真人配音版分镜） |
 | `docs/resume.md` | 简历条目与面试话术 |
 | `docs/技术栈说明.docx` / `技术点详解.docx` | 技术文档两份 |
 | `docs/项目评估报告-v2.docx` | 复评 8.0/10 |
